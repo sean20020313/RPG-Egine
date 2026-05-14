@@ -3,50 +3,114 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RPG 引擎（線上版）</title>
+  <title>RPG 線上版</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
   <main class="wrap">
-    <header>
+    <header class="top-header">
       <h1>RPG 線上版</h1>
-      <p class="sub">
-        部署在 Vercel 後直接開網址即可遊玩：邏輯在瀏覽器內執行（背包鏈結串列、任務佇列、戰鬥 Undo），無需安裝 Python 或編譯 C。
-        本機仍保留 <code>src/</code> C 引擎與 Flask 範例供課程對照。
-      </p>
+      <p class="sub">點擊技能與道具進行回合戰鬥；進度儲存在本機瀏覽器。</p>
     </header>
 
+    <div id="banner" class="banner" role="status" aria-live="polite"></div>
+
     <section class="panel" id="setup">
-      <h2>開始</h2>
-      <label>角色名稱（逗號分隔，最多 4 人）</label>
-      <input type="text" id="names" value="勇者" />
-      <div class="row">
-        <button type="button" id="btnNew">開新局</button>
-        <button type="button" id="btnResume" class="secondary">繼續上次（本機）</button>
-        <button type="button" id="btnClearSave" class="danger">清除存檔</button>
+      <h2>開始冒險</h2>
+      <label for="names">角色名稱（逗號分隔，最多 4 人）</label>
+      <input type="text" id="names" value="勇者" autocomplete="off" />
+      <div class="btn-row">
+        <button type="button" id="btnNew" class="btn-primary">開新局</button>
+        <button type="button" id="btnResume" class="btn-secondary">繼續上次</button>
+        <button type="button" id="btnClearSave" class="btn-danger">清除存檔</button>
       </div>
     </section>
 
-    <section class="panel hidden" id="game">
-      <div class="row">
-        <button type="button" data-act="explore">探索</button>
-        <button type="button" data-act="status" class="secondary">刷新狀態</button>
+    <section class="panel game-panel hidden" id="game">
+      <div class="hud">
+        <span class="hud-item">座標 <strong id="hud-map">(0, 0)</strong></span>
+        <span class="hud-item" id="hud-mode-explore">模式：<strong>探索</strong></span>
+        <span class="hud-item hidden" id="hud-mode-battle">模式：<strong class="text-battle">戰鬥</strong></span>
       </div>
-      <div class="row battle-only hidden" id="battleRow">
-        <button type="button" data-act="attack">攻擊</button>
-        <button type="button" data-act="defend">防禦</button>
-        <button type="button" data-act="flee">逃跑</button>
-        <button type="button" data-act="undo">Undo</button>
+
+      <div class="layout">
+        <aside class="col-side">
+          <h3 class="section-title">隊伍</h3>
+          <div id="party-list" class="party-list"></div>
+          <h3 class="section-title">任務</h3>
+          <div id="quest-list" class="quest-list"></div>
+        </aside>
+
+        <section class="col-main">
+          <div id="scene-explore" class="scene scene-explore">
+            <div class="scene-bg explore-art" aria-hidden="true"></div>
+            <p class="scene-hint">點擊下方「探索」遭遇事件、撿道具或進入戰鬥。</p>
+            <button type="button" id="btnExploreBig" class="btn-explore">
+              <span class="btn-explore-icon" aria-hidden="true">🧭</span>
+              <span>探索荒野</span>
+            </button>
+          </div>
+
+          <div id="scene-battle" class="scene scene-battle hidden">
+            <div class="monster-stage">
+              <div id="monster-emoji" class="monster-emoji" aria-hidden="true">👾</div>
+              <div class="monster-info">
+                <h2 id="monster-name" class="monster-name">—</h2>
+                <div class="stat-row small">
+                  <span>ATK <strong id="monster-atk">0</strong></span>
+                  <span>DEF <strong id="monster-def">0</strong></span>
+                </div>
+                <div class="bar-wrap" title="魔物 HP">
+                  <div class="bar-label"><span>HP</span><span id="monster-hp-text">0 / 0</span></div>
+                  <div class="bar"><div id="monster-hp-fill" class="bar-fill enemy"></div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="active-hero-battle">
+              <p class="who-label">操作中</p>
+              <div id="battle-hero-card" class="hero-card compact"></div>
+            </div>
+
+            <div class="skill-dock">
+              <p class="dock-label">技能</p>
+              <div class="skill-grid" id="skill-grid">
+                <button type="button" class="skill-btn skill-atk" data-skill="attack" title="對敵人造成物理傷害">
+                  <span class="skill-ico" aria-hidden="true">⚔️</span>
+                  <span class="skill-txt">攻擊</span>
+                </button>
+                <button type="button" class="skill-btn skill-def" data-skill="defend" title="提升防禦並承受敵方一擊">
+                  <span class="skill-ico" aria-hidden="true">🛡️</span>
+                  <span class="skill-txt">防禦</span>
+                </button>
+                <button type="button" class="skill-btn skill-flee" data-skill="flee" title="嘗試離開戰鬥">
+                  <span class="skill-ico" aria-hidden="true">🏃</span>
+                  <span class="skill-txt">逃跑</span>
+                </button>
+                <button type="button" class="skill-btn skill-undo" data-skill="undo" id="btn-undo" title="回溯上一行動（戰鬥中）">
+                  <span class="skill-ico" aria-hidden="true">↩️</span>
+                  <span class="skill-txt">回溯</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="item-dock-wrap">
+              <p class="dock-label">道具（點擊使用）</p>
+              <div id="item-dock-battle" class="item-dock"></div>
+            </div>
+          </div>
+        </section>
       </div>
-      <div class="row battle-only hidden" id="useRow">
-        <label>道具欄位 <input type="number" id="useSlot" min="0" value="0" /></label>
-        <button type="button" id="btnUse">使用道具</button>
+
+      <div id="scene-explore-footer" class="explore-footer explore-only">
+        <p class="dock-label">道具欄（探索中可檢視，戰鬥中點擊使用）</p>
+        <div id="item-dock-explore" class="item-dock muted"></div>
       </div>
-      <div class="row explore-only">
-        <label>切換角色索引 <input type="number" id="swIdx" min="0" value="0" /></label>
-        <button type="button" id="btnSwitch">切換</button>
-      </div>
-      <pre id="log" class="log"></pre>
+
+      <details class="debug-details">
+        <summary>詳細狀態（JSON）</summary>
+        <pre id="raw-json" class="raw-json"></pre>
+      </details>
     </section>
   </main>
   <script src="./engine.js"></script>
