@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RPG 引擎</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <h1>RPG（C 引擎 × Flask）</h1>
+      <p class="sub">探索、回合戰鬥、背包鏈結串列、任務佇列、戰鬥 Undo。</p>
+    </header>
+
+    <section class="panel" id="setup">
+      <h2>開新局</h2>
+      <label>角色名稱（逗號分隔，最多 4 人）</label>
+      <input type="text" id="names" value="勇者" />
+      <button type="button" id="btnNew">建立</button>
+    </section>
+
+    <section class="panel hidden" id="game">
+      <p class="meta">Session: <code id="sid"></code></p>
+      <div class="row">
+        <button type="button" data-act="explore">探索</button>
+        <button type="button" data-act="status">刷新狀態</button>
+      </div>
+      <div class="row battle-only hidden" id="battleRow">
+        <button type="button" data-act="attack">攻擊</button>
+        <button type="button" data-act="defend">防禦</button>
+        <button type="button" data-act="flee">逃跑</button>
+        <button type="button" data-act="undo">Undo</button>
+      </div>
+      <div class="row battle-only hidden" id="useRow">
+        <label>道具欄位 <input type="number" id="useSlot" min="0" value="0" /></label>
+        <button type="button" id="btnUse">使用道具</button>
+      </div>
+      <div class="row explore-only">
+        <label>切換角色索引 <input type="number" id="swIdx" min="0" value="0" /></label>
+        <button type="button" id="btnSwitch">切換</button>
+      </div>
+      <pre id="log" class="log"></pre>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

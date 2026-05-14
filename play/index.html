@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RPG 引擎（線上版）</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <h1>RPG 線上版</h1>
+      <p class="sub">
+        部署在 Vercel 後直接開網址即可遊玩：邏輯在瀏覽器內執行（背包鏈結串列、任務佇列、戰鬥 Undo），無需安裝 Python 或編譯 C。
+        本機仍保留 <code>src/</code> C 引擎與 Flask 範例供課程對照。
+      </p>
+    </header>
+
+    <section class="panel" id="setup">
+      <h2>開始</h2>
+      <label>角色名稱（逗號分隔，最多 4 人）</label>
+      <input type="text" id="names" value="勇者" />
+      <div class="row">
+        <button type="button" id="btnNew">開新局</button>
+        <button type="button" id="btnResume" class="secondary">繼續上次（本機）</button>
+        <button type="button" id="btnClearSave" class="danger">清除存檔</button>
+      </div>
+    </section>
+
+    <section class="panel hidden" id="game">
+      <div class="row">
+        <button type="button" data-act="explore">探索</button>
+        <button type="button" data-act="status" class="secondary">刷新狀態</button>
+      </div>
+      <div class="row battle-only hidden" id="battleRow">
+        <button type="button" data-act="attack">攻擊</button>
+        <button type="button" data-act="defend">防禦</button>
+        <button type="button" data-act="flee">逃跑</button>
+        <button type="button" data-act="undo">Undo</button>
+      </div>
+      <div class="row battle-only hidden" id="useRow">
+        <label>道具欄位 <input type="number" id="useSlot" min="0" value="0" /></label>
+        <button type="button" id="btnUse">使用道具</button>
+      </div>
+      <div class="row explore-only">
+        <label>切換角色索引 <input type="number" id="swIdx" min="0" value="0" /></label>
+        <button type="button" id="btnSwitch">切換</button>
+      </div>
+      <pre id="log" class="log"></pre>
+    </section>
+  </main>
+  <script src="./engine.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

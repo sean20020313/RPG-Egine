@@ -1,0 +1,8 @@
+{
+  "name": "rpg-engine",
+  "private": true,
+  "description": "Vercel build copies play/ to dist/ for static hosting",
+  "scripts": {
+    "vercel-build": "rm -rf dist && mkdir -p dist && cp -R play/. dist/"
+  }
+}
