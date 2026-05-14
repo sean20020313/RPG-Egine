@@ -130,6 +130,17 @@ flowchart TB
 3. 建置會執行 `npm run vercel-build`：把 `play/` 複製到 `dist/` 後作為靜態網站發佈（見根目錄 `vercel.json`）。**請勿在倉庫根目錄放置 `requirements.txt`**，否則 Vercel 會誤判為 Flask 專案並尋找 `app.py` 入口而建置失敗；Python 依賴已改放在 `web/requirements.txt`（僅本機用）。
 4. 部署完成後，開啟 Vercel 提供的網址即可遊玩。進度存在瀏覽器 **localStorage**（僅該瀏覽器本機；換裝置或清除網站資料會消失）。
 
+#### 對照：Vercel 官方「Flask on Vercel」文件
+
+依 [Deploy a Flask app on Vercel](https://vercel.com/docs/frameworks/backend/flask)（Backend / Flask）：
+
+- Vercel 會在下列**支援的入口檔**尋找名為 **`app`** 的 Flask 實例：`app.py`、`index.py`、`server.py`、`main.py`、`wsgi.py`、`asgi.py`，或同檔名放在 `src/`、`app/`、`api/` 底下。
+- 若應用程式在其它路徑（例如本專案的 `web/app.py`），需在 **`pyproject.toml`** 設定 `[tool.vercel]` 的 **`entrypoint`**，例如 `entrypoint = "web.app:app"`（指向模組內的 `app` 變數）。
+- 在 Vercel 上提供靜態檔應使用倉庫的 **`public/**`**；官方說明不建議依賴 Flask 的 `app.static_folder` 作為主要靜態託管方式。
+- **`vercel.json` 或控制台裡設定的 Build Command** 優先於 `pyproject.toml` 裡 `[tool.vercel.scripts]` 的 `build` 腳本。
+
+**與本專案的關係**：線上版刻意走 **Node 建置 + `outputDirectory: dist`**（內容來自 `play/`），**不是** Flask Python Runtime。因此不要在倉庫根目錄放會觸發「Flask 專案」偵測的檔案（例如根目錄 `requirements.txt`），否則會出現 *No Flask entrypoint found*。本機若要跑 Flask + C，請使用 `web/requirements.txt` 與 `FLASK_APP=web.app`（見下方「本機版」）。
+
 ---
 
 ### 本機版：Flask + C 引擎
@@ -233,5 +244,5 @@ flask run --host 127.0.0.1 --port 5000
 |------|----------------|
 | 架構與資料結構 | [核心架構](#核心架構)、[系統架構圖](#系統架構圖) |
 | 目錄與 GitHub 規範 | [GitHub 工程規範與目錄結構](#github-工程規範與目錄結構) |
-| 環境與編譯執行 | [製作方式](#製作方式) |
+| 環境與編譯執行 | [製作方式](#製作方式)（含 Vercel 靜態與官方 Flask 對照） |
 | 遊戲流程與限制 | [遊玩規則](#遊玩規則) |
