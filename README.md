@@ -66,6 +66,7 @@ RPG-Egine/
 │   ├── map.c                 # 地圖／探索
 │   └── main_cli.c          # 可選：純 C 除錯用 main
 ├── web/                      # Flask 後端
+│   ├── requirements.txt      # 本機 pip 用（勿放於倉庫根目錄，以免 Vercel 誤判 Flask）
 │   ├── app.py
 │   └── bridge.py             # 呼叫 C 可執行檔或載入 .so
 ├── static/                   # 前端（HTML/CSS/JS）
@@ -126,7 +127,7 @@ flowchart TB
 
 1. 將專案推上 GitHub。
 2. 在 [Vercel](https://vercel.com) 建立新專案並 Import 此 repo（**Root Directory 使用儲存庫根目錄**）。
-3. 建置會執行 `npm run vercel-build`：把 `play/` 複製到 `dist/` 後作為靜態網站發佈（見根目錄 `vercel.json`）。
+3. 建置會執行 `npm run vercel-build`：把 `play/` 複製到 `dist/` 後作為靜態網站發佈（見根目錄 `vercel.json`）。**請勿在倉庫根目錄放置 `requirements.txt`**，否則 Vercel 會誤判為 Flask 專案並尋找 `app.py` 入口而建置失敗；Python 依賴已改放在 `web/requirements.txt`（僅本機用）。
 4. 部署完成後，開啟 Vercel 提供的網址即可遊玩。進度存在瀏覽器 **localStorage**（僅該瀏覽器本機；換裝置或清除網站資料會消失）。
 
 ---
@@ -145,7 +146,7 @@ flowchart TB
 cd /path/to/RPG-Egine
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install flask
+pip install -r web/requirements.txt
 ```
 
 ### 2. 編譯 C 引擎
