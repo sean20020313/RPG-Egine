@@ -200,27 +200,117 @@
 
   function explore(g) {
     if (g.inBattle) {
-      g.message = "戰鬥中無法探索。";
+      g.message = "戰鬥中";
       return false;
     }
-    const roll = randRange(g, 1, 100);
-    g.mapX += randRange(g, -1, 1);
-    g.mapY += randRange(g, -1, 1);
-    if (roll <= 45) {
-      spawnMonster(g);
-      return true;
-    }
-    if (roll <= 65) {
-      invAdd(g.players[g.activePlayer], "藥草", 1, 12);
-      g.message = "你在路上撿到藥草（小回復）。";
-      return true;
-    }
-    if (roll <= 80) {
-      g.message = "四周很安靜，什麼也沒發生。";
-      return true;
-    }
-    g.message = "你感覺到遠方有任務的氣息…（繼續探索）。";
+    g.message = "";
     return true;
+  }
+
+  function monsterAt(g, x, y) {
+    return (g.mapMonsters || []).find((m) => m.x === x && m.y === y) || null;
+  }
+
+  function findAdjacentMapMonster(g) {
+    const dirs = [
+      [0, 1],
+      [0, -1],
+      [1, 0],
+      [-1, 0],
+    ];
+    for (const m of g.mapMonsters || []) {
+      if (m.x === g.mapX && m.y === g.mapY) return m;
+      for (const [dx, dy] of dirs) {
+        if (m.x === g.mapX + dx && m.y === g.mapY + dy) return m;
+      }
+    }
+    return null;
+  }
+
+  function removeMapMonsterById(g, id) {
+    g.mapMonsters = (g.mapMonsters || []).filter((m) => m.id !== id);
+  }
+
+  function startBattleFromMapMonster(g, m) {
+    g.monsterName = m.name;
+    g.monsterHp = m.hp;
+    g.monsterMaxHp = m.maxHp;
+    g.monsterAtk = m.atk;
+    g.monsterDef = m.def;
+    g.monsterExp = m.exp;
+    g.engagedMonsterId = m.id;
+    g.inBattle = 1;
+    g.playerDefBoostTurns = 0;
+    clearUndo(g);
+    g.message = "遭遇";
+  }
+
+  function mapEngage(g) {
+    if (g.inBattle) return playerAttack(g);
+    const m = findAdjacentMapMonster(g);
+    if (!m) {
+      g.message = "無目標";
+      return false;
+    }
+    startBattleFromMapMonster(g, m);
+    return true;
+  }
+
+  function initWorld(g) {
+    const seed = g.rngSeed >>> 0 || 1;
+    if (typeof WorldView !== "undefined" && WorldView.buildFixedMap) {
+      g.worldTiles = WorldView.buildFixedMap(seed);
+    } else {
+      g.worldTiles = [];
+    }
+    g.mapMonsters = [];
+    g.nextMonsterId = 1;
+    g.engagedMonsterId = 0;
+    g.mapX = 1;
+    g.mapY = 1;
+    spawnMapMonsters(g);
+  }
+
+  function spawnMapMonsters(g) {
+    const tiles = g.worldTiles;
+    if (!tiles?.length) return;
+    const spots = [];
+    const COLS = WorldView?.COLS || 15;
+    const ROWS = WorldView?.ROWS || 10;
+    for (let y = 1; y < ROWS - 1; y++) {
+      for (let x = 1; x < COLS - 1; x++) {
+        if (tiles[y][x] === 2) continue;
+        if (x === g.mapX && y === g.mapY) continue;
+        if (Math.abs(x - g.mapX) + Math.abs(y - g.mapY) < 3) continue;
+        spots.push({ x, y });
+      }
+    }
+    for (let i = spots.length - 1; i > 0; i--) {
+      const j = randRange(g, 0, i);
+      const t = spots[i];
+      spots[i] = spots[j];
+      spots[j] = t;
+    }
+    const count = Math.min(6, spots.length);
+    for (let i = 0; i < count; i++) {
+      const idx = randRange(g, 0, MONSTERS.length - 1);
+      const t = MONSTERS[idx];
+      let mh = t.hp + randRange(g, -3, 4);
+      if (mh < 8) mh = 8;
+      const spot = spots[i];
+      g.mapMonsters.push({
+        id: g.nextMonsterId++,
+        x: spot.x,
+        y: spot.y,
+        typeIndex: idx,
+        name: t.name,
+        hp: mh,
+        maxHp: mh,
+        atk: t.atk,
+        def: t.def,
+        exp: t.exp,
+      });
+    }
   }
 
   function playerAttack(g) {
@@ -230,6 +320,10 @@
     let dmg = physDamage(g, p.atk, g.monsterDef);
     g.monsterHp -= dmg;
     if (g.monsterHp < 0) g.monsterHp = 0;
+    if (g.engagedMonsterId) {
+      const em = (g.mapMonsters || []).find((m) => m.id === g.engagedMonsterId);
+      if (em) em.hp = g.monsterHp;
+    }
     g.message = `你攻擊造成 ${dmg} 傷害。`;
     if (g.monsterHp <= 0) {
       g.message += " 擊敗魔物！";
@@ -248,6 +342,10 @@
         g.message += " 升級！";
       }
       g.inBattle = 0;
+      if (g.engagedMonsterId) {
+        removeMapMonsterById(g, g.engagedMonsterId);
+        g.engagedMonsterId = 0;
+      }
       clearUndo(g);
       return true;
     }
@@ -255,6 +353,7 @@
     if (p.hp <= 0) {
       g.message += " 你戰敗…";
       g.inBattle = 0;
+      g.engagedMonsterId = 0;
       clearUndo(g);
       p.hp = 1;
     }
@@ -308,6 +407,7 @@
     if (r <= chance) {
       g.message = "成功逃離戰鬥。";
       g.inBattle = 0;
+      g.engagedMonsterId = 0;
       clearUndo(g);
       return true;
     }
@@ -384,7 +484,8 @@
     }
     g.playerCount = g.players.length;
     bootstrapQuests(g);
-    g.message = `新冒險開始！已建立 ${g.playerCount} 名角色。`;
+    initWorld(g);
+    g.message = "出發";
     return g;
   }
 
@@ -392,7 +493,8 @@
     const c = String(cmd || "").toLowerCase();
     if (c === "status") return true;
     if (c === "explore") return explore(g);
-    if (c === "attack") return playerAttack(g);
+    if (c === "attack") return mapEngage(g);
+    if (c === "battle_attack") return playerAttack(g);
     if (c === "defend") return playerDefend(g);
     if (c === "flee") return playerFlee(g);
     if (c === "undo") return popUndo(g);
@@ -468,6 +570,9 @@
       players,
       quests: questsToArray(g),
       battle,
+      world_tiles: g.worldTiles,
+      map_monsters: (g.mapMonsters || []).map((m) => ({ ...m })),
+      engaged_monster_id: g.engagedMonsterId || 0,
     };
   }
 
@@ -485,8 +590,12 @@
       });
     }
     return {
-      v: 1,
+      v: 2,
       rngSeed: g.rngSeed,
+      worldTiles: g.worldTiles,
+      mapMonsters: g.mapMonsters || [],
+      nextMonsterId: g.nextMonsterId || 1,
+      engagedMonsterId: g.engagedMonsterId || 0,
       playerCount: g.playerCount,
       activePlayer: g.activePlayer,
       mapX: g.mapX,
@@ -518,7 +627,7 @@
   }
 
   function deserialize(data) {
-    if (!data || data.v !== 1) return null;
+    if (!data || (data.v !== 1 && data.v !== 2)) return null;
     const g = {
       rngSeed: data.rngSeed >>> 0 || 1,
       playerCount: data.playerCount || 1,
@@ -537,6 +646,10 @@
       undo: Array.isArray(data.undo) ? data.undo.slice() : [],
       message: data.message || "",
       players: [],
+      worldTiles: data.worldTiles || null,
+      mapMonsters: Array.isArray(data.mapMonsters) ? data.mapMonsters : [],
+      nextMonsterId: data.nextMonsterId || 1,
+      engagedMonsterId: data.engagedMonsterId || 0,
     };
     const parr = data.players || [];
     for (let i = 0; i < parr.length && i < MAX_PLAYERS; i++) {
@@ -568,8 +681,26 @@
         next: null,
       });
     }
+    if (!g.worldTiles?.length) {
+      if (typeof WorldView !== "undefined" && WorldView.buildFixedMap) {
+        g.worldTiles = WorldView.buildFixedMap(g.rngSeed);
+      }
+      if (!g.mapMonsters.length) spawnMapMonsters(g);
+    }
+    if (g.inBattle && g.engagedMonsterId) {
+      const em = g.mapMonsters.find((m) => m.id === g.engagedMonsterId);
+      if (!em) g.inBattle = 0;
+    }
     return g;
   }
 
-  global.RPG = { newGame, applyCommand, toView, serialize, deserialize, MAX_PLAYERS };
+  global.RPG = {
+    newGame,
+    applyCommand,
+    toView,
+    serialize,
+    deserialize,
+    monsterAt,
+    MAX_PLAYERS,
+  };
 })(typeof window !== "undefined" ? window : globalThis);
