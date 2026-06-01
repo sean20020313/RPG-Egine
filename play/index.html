@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RPG</title>
+  <title>RPG Adventure</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -12,115 +12,94 @@
   <main class="wrap">
     <header class="brand">
       <div class="brand-mark" aria-hidden="true"></div>
+      <div class="brand-text">
+        <h1>RPG Adventure</h1>
+        <p class="brand-tag">HD-2D · One Hero · One Story</p>
+      </div>
     </header>
 
     <section class="glass setup" id="setup">
-      <div class="setup-inner">
-        <div class="hero-slots" id="hero-slots">
-          <button type="button" class="slot-pick on" data-slot="0" aria-hidden="true"><span class="slot-glyph">◆</span></button>
-          <button type="button" class="slot-pick" data-slot="1" aria-hidden="true"><span class="slot-glyph">◇</span></button>
-          <button type="button" class="slot-pick" data-slot="2" aria-hidden="true"><span class="slot-glyph">○</span></button>
-          <button type="button" class="slot-pick" data-slot="3" aria-hidden="true"><span class="slot-glyph">□</span></button>
+      <h2 class="panel-title">Choose Your Hero</h2>
+      <p class="panel-hint">Each class has a unique look and story. Pick one hero for this adventure.</p>
+      <div class="setup-inner setup-class">
+        <div class="class-grid" id="class-grid">
+          <button type="button" class="class-pick on" data-job="warrior">
+            <canvas class="class-preview" width="72" height="72" aria-hidden="true"></canvas>
+            <span class="class-name">Warrior</span>
+            <span class="class-hero-name">Aldric</span>
+          </button>
+          <button type="button" class="class-pick" data-job="mage">
+            <canvas class="class-preview" width="72" height="72" aria-hidden="true"></canvas>
+            <span class="class-name">Mage</span>
+            <span class="class-hero-name">Lyra</span>
+          </button>
+          <button type="button" class="class-pick" data-job="priest">
+            <canvas class="class-preview" width="72" height="72" aria-hidden="true"></canvas>
+            <span class="class-name">Priest</span>
+            <span class="class-hero-name">Elara</span>
+          </button>
+          <button type="button" class="class-pick" data-job="thief">
+            <canvas class="class-preview" width="72" height="72" aria-hidden="true"></canvas>
+            <span class="class-name">Thief</span>
+            <span class="class-hero-name">Kade</span>
+          </button>
+        </div>
+        <div class="setup-story" id="setup-story">
+          <h3 class="story-title" id="setup-story-title">Oath of the Fallen Fort</h3>
+          <p class="story-intro" id="setup-story-intro"></p>
         </div>
         <div class="setup-actions">
-          <button type="button" id="btnNew" class="orb-btn orb-gold"><span class="orb-ico" aria-hidden="true">◇</span></button>
-          <button type="button" id="btnResume" class="orb-btn orb-silver"><span class="orb-ico" aria-hidden="true">◎</span></button>
-          <button type="button" id="btnClearSave" class="orb-btn orb-ember"><span class="orb-ico" aria-hidden="true">✕</span></button>
+          <button type="button" id="btnNew" class="btn-text btn-primary">New Game</button>
+          <button type="button" id="btnResume" class="btn-text btn-secondary">Continue</button>
+          <button type="button" id="btnClearSave" class="btn-text btn-danger">Clear Save</button>
         </div>
       </div>
     </section>
 
     <section class="glass game-root hidden" id="game">
-      <nav class="hud-pills">
-        <div class="pill pill-map">
-          <canvas id="mini-map" class="mini-map" width="56" height="56" aria-hidden="true"></canvas>
-        </div>
-        <div class="pill" id="hud-mode-explore"><span class="pill-ico" aria-hidden="true">🌿</span></div>
-        <div class="pill pill-battle hidden" id="hud-mode-battle"><span class="pill-ico" aria-hidden="true">⚔️</span></div>
-        <button type="button" id="btn-menu" class="pill pill-menu"><span class="pill-ico" aria-hidden="true">☰</span></button>
-        <button type="button" id="btn-home" class="pill pill-home"><span class="pill-ico" aria-hidden="true">⌂</span></button>
-        <button type="button" id="btn-restart" class="pill pill-restart"><span class="pill-ico" aria-hidden="true">↻</span></button>
+      <nav class="hud-pills hud-minimal">
+        <button type="button" id="btn-home" class="pill pill-btn">Home</button>
+        <button type="button" id="btn-restart" class="pill pill-btn">Restart</button>
       </nav>
 
-      <div id="menu-overlay" class="menu-overlay hidden">
-        <div class="menu-panel">
-          <button type="button" class="menu-close" id="menu-close" aria-hidden="true">✕</button>
-          <div class="menu-grid">
-            <button type="button" class="menu-cell" data-menu="party"><span aria-hidden="true">👥</span></button>
-            <button type="button" class="menu-cell" data-menu="quests"><span aria-hidden="true">📜</span></button>
-            <button type="button" class="menu-cell" data-menu="items"><span aria-hidden="true">🎒</span></button>
-            <button type="button" class="menu-cell" data-menu="save"><span aria-hidden="true">💾</span></button>
-            <button type="button" class="menu-cell" data-menu="home"><span aria-hidden="true">⌂</span></button>
-            <button type="button" class="menu-cell" data-menu="restart"><span aria-hidden="true">↻</span></button>
-          </div>
-        </div>
-      </div>
-
       <div class="layout">
-        <aside class="rail" id="rail-party">
-          <h2 class="rail-h"><span class="rail-h-ico" aria-hidden="true">👥</span></h2>
-          <div id="party-list" class="party-list"></div>
-        </aside>
-        <aside class="rail hidden" id="rail-quests">
-          <h2 class="rail-h"><span class="rail-h-ico" aria-hidden="true">📜</span></h2>
+        <aside class="rail" id="rail-story">
+          <h2 class="rail-title">Story</h2>
+          <p class="story-chapter" id="story-title">—</p>
+          <p class="story-intro" id="story-intro">—</p>
+          <h3 class="rail-sub">Quests</h3>
           <div id="quest-list" class="quest-list"></div>
+          <h2 class="rail-title rail-hero-head">Hero</h2>
+          <div id="party-list" class="party-list"></div>
         </aside>
 
         <div class="stage-wrap">
           <div id="scene-explore" class="stage stage-explore">
-            <canvas id="world-canvas" class="world-canvas" width="480" height="320" aria-hidden="true"></canvas>
-            <div class="dpad" id="dpad" aria-hidden="true">
-              <button type="button" class="dpad-btn d-up" data-dir="up">▲</button>
-              <button type="button" class="dpad-btn d-left" data-dir="left">◀</button>
-              <button type="button" class="dpad-btn d-mid d-atk" data-dir="attack">⚔</button>
-              <button type="button" class="dpad-btn d-right" data-dir="right">▶</button>
-              <button type="button" class="dpad-btn d-down" data-dir="down">▼</button>
+            <div class="map-frame hd2d-frame">
+              <canvas id="world-canvas" class="world-canvas" width="480" height="320" aria-label="Game map"></canvas>
             </div>
-          </div>
-
-          <div id="scene-battle" class="stage stage-battle hidden">
-            <div class="arena">
-              <div class="arena-side arena-ally">
-                <div id="battle-hero-card" class="battle-portrait"></div>
+            <p class="map-hint">Move: WASD / arrows · Attack (adjacent): Attack or Space</p>
+            <div class="map-controls">
+              <div class="dpad" id="dpad">
+                <button type="button" class="dpad-btn d-up" data-dir="up">Up</button>
+                <button type="button" class="dpad-btn d-left" data-dir="left">Left</button>
+                <span class="dpad-spacer" aria-hidden="true"></span>
+                <button type="button" class="dpad-btn d-right" data-dir="right">Right</button>
+                <button type="button" class="dpad-btn d-down" data-dir="down">Down</button>
               </div>
-              <div class="arena-divider" aria-hidden="true"></div>
-              <div class="arena-side arena-foe">
-                <div class="foe-frame" id="foe-frame">
-                  <div id="monster-emoji" class="foe-face">👾</div>
-                  <div class="foe-glow"></div>
-                </div>
-                <div class="foe-bars">
-                  <div class="gem-row">
-                    <span class="gem"><span aria-hidden="true">⚔</span><b id="monster-atk">0</b></span>
-                    <span class="gem"><span aria-hidden="true">🛡</span><b id="monster-def">0</b></span>
-                  </div>
-                  <div class="mega-bar foe-hp"><div id="monster-hp-fill" class="mega-fill"></div></div>
-                </div>
-              </div>
-            </div>
-            <div class="command-deck">
-              <div class="skill-ring" id="skill-grid">
-                <button type="button" class="sigil sigil-atk" data-skill="attack"></button>
-                <button type="button" class="sigil sigil-def" data-skill="defend"></button>
-                <button type="button" class="sigil sigil-flee" data-skill="flee"></button>
-                <button type="button" class="sigil sigil-undo" data-skill="undo" id="btn-undo"></button>
-              </div>
-              <div class="belt-wrap"><div id="item-dock-battle" class="item-belt"></div></div>
+              <button type="button" id="btn-map-atk" class="map-atk-btn">Attack</button>
             </div>
           </div>
         </div>
-      </div>
-
-      <div id="scene-explore-footer" class="belt-footer explore-only">
-        <div id="item-dock-explore" class="item-belt muted"></div>
       </div>
     </section>
   </main>
 
   <div id="fx-layer" class="fx-layer" aria-hidden="true"></div>
 
-  <script src="./engine.js"></script>
-  <script src="./world.js"></script>
-  <script src="./app.js"></script>
+  <script src="./stories.js?v=6"></script>
+  <script src="./engine.js?v=6"></script>
+  <script src="./world.js?v=6"></script>
+  <script src="./app.js?v=6"></script>
 </body>
 </html>

@@ -1,12 +1,15 @@
 const $ = (id) => document.getElementById(id);
-const STORAGE_KEY = "rpg-engine-browser-v2";
-const SLOT_GLYPHS = ["◆", "◇", "○", "□"];
-const DEFAULT_HUES = [210, 280, 160, 30];
+const STORAGE_KEY = "rpg-engine-browser-v5";
 
 let game = null;
 let animFrame = 0;
 let animId = null;
 let facing = "down";
+let resetPending = false;
+
+function storyFor(jobId) {
+  return window.HeroStories?.[jobId] || window.HeroStories?.warrior || null;
+}
 
 function loadState() {
   try {
@@ -19,6 +22,7 @@ function loadState() {
 }
 
 function saveState(g) {
+  if (!g || g.gameOver) return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(RPG.serialize(g)));
   } catch (e) {
@@ -31,44 +35,21 @@ function pct(cur, max) {
   return Math.min(100, Math.round((100 * cur) / max));
 }
 
-function monsterEmoji(name) {
-  if (!name) return "👾";
-  if (name.includes("史萊姆")) return "🫧";
-  if (name.includes("哥布林")) return "👺";
-  if (name.includes("狼")) return "🐺";
-  if (name.includes("石像鬼")) return "🗿";
-  return "👾";
-}
-
-function itemEmoji(name) {
-  if (name.includes("藥草")) return "🌿";
-  if (name.includes("強效")) return "💜";
-  if (name.includes("藥水")) return "💧";
-  return "✧";
+function jobLabel(jobId) {
+  const s = storyFor(jobId);
+  if (s) return `${s.name} · ${s.className}`;
+  const j = WorldView?.getJob?.(jobId);
+  return j?.name || "Hero";
 }
 
 function classifyFx(msg) {
   if (!msg || !String(msg).trim()) return null;
-  const m = String(msg);
-  if (m.includes("遭遇")) return { icon: "⚔️", cls: "fx-battle" };
-  if (m.includes("擊敗")) return { icon: "✨", cls: "fx-win" };
-  if (m.includes("反擊") || m.includes("傷害")) return { icon: "💥", cls: "fx-hit" };
-  if (m.includes("成功逃離")) return { icon: "🏃", cls: "fx-flee" };
-  if (m.includes("逃跑失敗")) return { icon: "❗", cls: "fx-warn" };
-  if (m.includes("回溯")) return { icon: "↩️", cls: "fx-undo" };
-  if (m.includes("撿到") || m.includes("藥草")) return { icon: "🧺", cls: "fx-loot" };
-  if (m.includes("防禦")) return { icon: "🛡️", cls: "fx-def" };
-  if (m.includes("回復") || m.includes("使用道具")) return { icon: "💚", cls: "fx-heal" };
-  if (m.includes("任務")) return { icon: "📜", cls: "fx-quest" };
-  if (m.includes("升級")) return { icon: "⬆️", cls: "fx-lvl" };
-  if (m.includes("戰鬥中") || m.includes("不能") || m.includes("無效") || m.includes("此欄位"))
-    return { icon: "🚫", cls: "fx-warn" };
-  if (m.includes("冒險") || m.includes("角色")) return { icon: "🎴", cls: "fx-start" };
-  if (m.includes("安靜") || m.includes("氣息")) return { icon: "🌙", cls: "fx-calm" };
-  if (m.includes("沒有存檔") || m.includes("已清除")) return { icon: "📂", cls: "fx-save" };
-  if (m.includes("攻擊")) return { icon: "⚔️", cls: "fx-atk" };
-  if (m.includes("無目標") || m.includes("受阻")) return { icon: "🚫", cls: "fx-warn" };
-  if (m.includes("出發")) return { icon: "🎴", cls: "fx-start" };
+  const m = String(msg).toLowerCase();
+  if (m.includes("game over")) return { icon: "💀", cls: "fx-warn" };
+  if (m.includes("victory") || m.includes("quest:")) return { icon: "✨", cls: "fx-win" };
+  if (m.includes(" hit ") || m.includes("attack ")) return { icon: "💥", cls: "fx-hit" };
+  if (m.includes("no target") || m.includes("blocked")) return { icon: "🚫", cls: "fx-warn" };
+  if (m.includes("level")) return { icon: "⬆️", cls: "fx-lvl" };
   return { icon: "✦", cls: "fx-neutral" };
 }
 
@@ -90,66 +71,80 @@ function spawnFx(message, anchorEl) {
   layer.appendChild(el);
   requestAnimationFrame(() => el.classList.add("show"));
   setTimeout(() => el.remove(), 900);
-  if (fx.cls === "fx-hit" || fx.cls === "fx-battle") {
-    $("foe-frame")?.classList.add("shake");
-    setTimeout(() => $("foe-frame")?.classList.remove("shake"), 400);
-  }
-  if (fx.cls === "fx-heal") {
-    document.querySelector(".arena-ally")?.classList.add("glow-heal");
-    setTimeout(() => document.querySelector(".arena-ally")?.classList.remove("glow-heal"), 500);
+  if (fx.cls === "fx-hit") {
+    $("world-canvas")?.classList.add("shake-map");
+    setTimeout(() => $("world-canvas")?.classList.remove("shake-map"), 300);
   }
 }
 
-function heroCardHtml(p, { compact = false, active = false, selectable = false, hidePartyIndex = false } = {}) {
-  const hue = DEFAULT_HUES[p.index % DEFAULT_HUES.length] ?? hueFromName(p.name);
-  const glyph = SLOT_GLYPHS[p.index % SLOT_GLYPHS.length] || "◆";
+function heroStatsHtml(p) {
   const hpp = pct(p.hp, p.max_hp);
   const mpp = pct(p.mp, p.max_mp);
-  const cls = ["portrait-card", compact && "compact", active && "is-active", selectable && "is-selectable"]
-    .filter(Boolean)
-    .join(" ");
-  const dataIdx = hidePartyIndex ? "" : ` data-party-index="${p.index}"`;
   return `
-    <article class="${cls}"${dataIdx}>
-      <div class="ring-avatar" style="--hue:${hue}"><span>${glyph}</span></div>
-      <span class="lv-badge">${p.level}</span>
-      <div class="vitals">
-        <div class="mega-bar hp"><div class="mega-fill" style="width:${hpp}%"></div></div>
-        <div class="mega-bar mp"><div class="mega-fill" style="width:${mpp}%"></div></div>
-      </div>
-      <div class="mic-stats">
-        <span>⚔<b>${p.atk}</b></span>
-        <span>🛡<b>${p.def}</b></span>
-        <span>✧<b>${p.exp}</b></span>
-      </div>
+    <p class="hero-class-tag">${jobLabel(p.job_id)}</p>
+    <p class="hero-lv">Lv <b>${p.level}</b></p>
+    <div class="vitals">
+      <span class="bar-tag">HP</span>
+      <div class="mega-bar hp"><div class="mega-fill" style="width:${hpp}%"></div></div>
+      <span class="bar-tag">MP</span>
+      <div class="mega-bar mp"><div class="mega-fill" style="width:${mpp}%"></div></div>
+    </div>
+    <div class="mic-stats">
+      <span>ATK <b>${p.atk}</b></span>
+      <span>DEF <b>${p.def}</b></span>
+      <span>EXP <b>${p.exp}</b></span>
+    </div>`;
+}
+
+function heroCardHtml(p) {
+  return `
+    <article class="portrait-card hero-card-single">
+      <canvas class="hero-portrait-sm" data-job="${p.job_id || "warrior"}" width="72" height="72"></canvas>
+      ${heroStatsHtml(p)}
     </article>`;
 }
 
-function hueFromName(name) {
-  let h = 0;
-  for (let i = 0; i < String(name).length; i++) h = (h * 31 + String(name).charCodeAt(i)) >>> 0;
-  return h % 360;
+function paintHeroPortraits(root) {
+  if (!WorldView?.drawHeroPortrait) return;
+  (root || document).querySelectorAll(".hero-portrait-sm, .class-preview").forEach((c) => {
+    const job = c.getAttribute("data-job") || c.closest(".class-pick")?.getAttribute("data-job");
+    if (job) WorldView.drawHeroPortrait(c, job, animFrame);
+  });
+}
+
+function updateSetupStory(jobId) {
+  const s = storyFor(jobId);
+  const title = $("setup-story-title");
+  const intro = $("setup-story-intro");
+  if (title) title.textContent = s?.title || "Adventure";
+  if (intro) intro.textContent = s?.intro || "";
+  document.querySelectorAll(".class-pick").forEach((btn) => {
+    const canvas = btn.querySelector(".class-preview");
+    if (canvas) {
+      canvas.setAttribute("data-job", btn.getAttribute("data-job"));
+      if (WorldView?.drawHeroPortrait) {
+        WorldView.drawHeroPortrait(canvas, btn.getAttribute("data-job"), animFrame);
+      }
+    }
+  });
+}
+
+function renderStory(view) {
+  const title = $("story-title");
+  const intro = $("story-intro");
+  if (title) title.textContent = view.story_title || storyFor(view.hero_job_id)?.title || "—";
+  if (intro) intro.textContent = view.story_intro || storyFor(view.hero_job_id)?.intro || "—";
 }
 
 function renderParty(view) {
   const el = $("party-list");
-  const inExplore = view.phase === "explore";
-  el.innerHTML = view.players
-    .map((p) =>
-      heroCardHtml(p, {
-        compact: false,
-        active: p.index === view.active_player,
-        selectable: inExplore && view.players.length > 1,
-      }),
-    )
-    .join("");
-  el.querySelectorAll("[data-party-index]").forEach((card) => {
-    if (!inExplore || view.players.length <= 1) return;
-    card.addEventListener("click", () => {
-      const idx = Number(card.getAttribute("data-party-index"));
-      if (!Number.isNaN(idx)) run("switch", idx);
-    });
-  });
+  const p = view.players[0];
+  if (!p) {
+    el.innerHTML = "";
+    return;
+  }
+  el.innerHTML = heroCardHtml(p);
+  paintHeroPortraits(el);
 }
 
 function renderQuests(view) {
@@ -160,7 +155,8 @@ function renderQuests(view) {
       const done = q.done ? "done" : "";
       return `<div class="quest-sigil ${done}">
         <div class="quest-shine" style="width:${pc}%"></div>
-        <span class="q-ico" aria-hidden="true">📜</span>
+        <span class="q-title">${q.title || "Quest"}</span>
+        <p class="q-desc">${q.desc || ""}</p>
         <div class="q-ring" style="background:conic-gradient(#d4b66a ${pc}%, rgba(255,255,255,0.06) 0)">
           <span class="q-ring-inner">${q.progress}<span class="q-slash">/</span>${q.target}</span>
         </div>
@@ -169,89 +165,84 @@ function renderQuests(view) {
     .join("");
 }
 
-function renderItemDock(el, view, { interactive } = { interactive: false }) {
-  const p = view.players[view.active_player];
-  if (!p?.inventory?.length) {
-    el.innerHTML = "";
-    return;
-  }
-  el.innerHTML = p.inventory
-    .map((it) => {
-      const disabled = !interactive || it.quantity <= 0;
-      const em = itemEmoji(it.name);
-      return `<button type="button" class="potion" data-item-slot="${it.slot}" data-emoji="${em}" ${
-        disabled ? "disabled" : ""
-      }"><span class="stk">${it.quantity}</span></button>`;
-    })
-    .join("");
-  if (interactive) {
-    el.querySelectorAll("[data-item-slot]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        if (!btn.disabled) run("use", Number(btn.getAttribute("data-item-slot")));
-      });
-    });
-  }
+function heroJobId(view) {
+  return view.hero_job_id || view.players[0]?.job_id || game?.heroJobId || "warrior";
 }
 
-function renderBattleScene(view) {
-  const b = view.battle;
-  if (!b) return;
-  $("monster-emoji").textContent = monsterEmoji(b.name);
-  $("monster-atk").textContent = String(b.atk);
-  $("monster-def").textContent = String(b.def);
-  $("monster-hp-fill").style.width = `${pct(b.hp, b.max_hp)}%`;
-  const p = view.players[view.active_player];
-  $("battle-hero-card").innerHTML = p
-    ? heroCardHtml(p, { compact: true, active: true, selectable: false, hidePartyIndex: true })
-    : "";
+function tilesOk(tiles) {
+  if (!tiles || !WorldView) return false;
+  return tiles.length === WorldView.ROWS && tiles[0]?.length === WorldView.COLS;
 }
 
-function applyScene(view) {
-  const battle = view.phase === "battle";
-  $("scene-explore").classList.toggle("hidden", battle);
-  $("scene-battle").classList.toggle("hidden", !battle);
-  $("scene-explore-footer").classList.toggle("hidden", battle);
-  $("hud-mode-explore").classList.toggle("hidden", battle);
-  $("hud-mode-battle").classList.toggle("hidden", !battle);
-  $("dpad").classList.toggle("hidden", battle);
+function rebuildWorld() {
+  if (!game || !WorldView?.buildFixedMap) return;
+  const seed = game.rngSeed >>> 0 || 1;
+  game.worldTiles = WorldView.buildFixedMap(seed);
+  game.mapMonsters = [];
+  game.nextMonsterId = 1;
+  game.mapX = 1;
+  game.mapY = 1;
+  game.inBattle = 0;
+  game.engagedMonsterId = 0;
+  RPG.ensureMapMonsters(game);
+}
 
-  $("skill-grid").querySelectorAll(".sigil").forEach((btn) => {
-    const sk = btn.getAttribute("data-skill");
-    if (!battle) {
-      btn.disabled = true;
-      return;
-    }
-    if (sk === "undo") btn.disabled = !view.battle?.can_undo;
-    else btn.disabled = false;
-  });
-
-  const midAtk = document.querySelector(".d-mid");
-  if (midAtk) midAtk.disabled = battle;
+function ensureWorld() {
+  if (!game) return;
+  game.inBattle = 0;
+  if (!tilesOk(game.worldTiles)) rebuildWorld();
+  if (!game.mapMonsters?.length) {
+    if (!game.nextMonsterId) game.nextMonsterId = 1;
+    RPG.ensureMapMonsters(game);
+  }
+  if (game.mapX < 1) game.mapX = 1;
+  if (game.mapY < 1) game.mapY = 1;
 }
 
 function renderWorldView(view) {
-  if (!game || view.phase === "battle") return;
+  if (!game) return;
+  ensureWorld();
   const c = $("world-canvas");
+  if (!c || !WorldView?.renderWorld) return;
+  if (WorldView.prepareCanvas) WorldView.prepareCanvas(c);
   const tiles = game.worldTiles;
   const monsters = game.mapMonsters || [];
-  if (c && WorldView && tiles?.length) {
-    WorldView.renderWorld(c, tiles, view.map.x, view.map.y, monsters, animFrame, facing);
-  }
-  const mini = $("mini-map");
-  if (mini && WorldView && tiles?.length) {
-    WorldView.drawMiniMap(mini, tiles, view.map.x, view.map.y, monsters);
+  const mx = game.mapX ?? 1;
+  const my = game.mapY ?? 1;
+  try {
+    WorldView.renderWorld(c, tiles, mx, my, monsters, animFrame, facing, heroJobId(view));
+  } catch (err) {
+    console.error("Map render error:", err);
+    rebuildWorld();
+    try {
+      WorldView.renderWorld(c, game.worldTiles, game.mapX, game.mapY, game.mapMonsters, animFrame, facing, heroJobId(view));
+    } catch (e2) {
+      const ctx = c.getContext("2d");
+      if (ctx && c.width > 0) {
+        ctx.fillStyle = "#3d7a48";
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.fillStyle = "#fff";
+        ctx.font = "14px sans-serif";
+        ctx.fillText("Map error — press Restart", 40, 80);
+      }
+    }
   }
 }
 
+function paintMapAfterShow() {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (game) renderView(RPG.toView(game));
+    });
+  });
+}
+
 function renderView(view, fxMsg) {
+  renderStory(view);
   renderParty(view);
   renderQuests(view);
-  renderItemDock($("item-dock-explore"), view, { interactive: false });
-  renderItemDock($("item-dock-battle"), view, { interactive: view.phase === "battle" });
-  if (view.phase === "battle") renderBattleScene(view);
-  applyScene(view);
   renderWorldView(view);
-  if (fxMsg) spawnFx(fxMsg, view.phase === "battle" ? $("foe-frame") : $("world-canvas"));
+  if (fxMsg) spawnFx(fxMsg, $("world-canvas"));
 }
 
 function startAnimLoop() {
@@ -260,42 +251,40 @@ function startAnimLoop() {
     animFrame++;
     if (game && $("game") && !$("game").classList.contains("hidden")) {
       const view = RPG.toView(game);
-      if (view.phase === "explore") renderWorldView(view);
+      renderWorldView(view);
+      paintHeroPortraits($("party-list"));
+      paintHeroPortraits($("class-grid"));
     }
     animId = requestAnimationFrame(tick);
   };
   animId = requestAnimationFrame(tick);
 }
 
-function selectedHeroNames() {
-  const picks = document.querySelectorAll(".slot-pick.on");
-  const names = [];
-  picks.forEach((btn) => {
-    const i = Number(btn.getAttribute("data-slot"));
-    names.push(SLOT_GLYPHS[i] || `H${i + 1}`);
-  });
-  return names.length ? names : [SLOT_GLYPHS[0]];
+function selectedJobId() {
+  const on = document.querySelector(".class-pick.on");
+  return on?.getAttribute("data-job") || "warrior";
 }
 
 function syncMapFromEngine() {
-  if (!game) return;
+  if (!game || !WorldView) return;
   const p = WorldView.clampPos(game.mapX, game.mapY);
   game.mapX = p.x;
   game.mapY = p.y;
 }
 
 function moveHero(dx, dy) {
-  if (!game || game.inBattle) return;
+  if (!game || resetPending) return;
+  ensureWorld();
   syncMapFromEngine();
   const nx = game.mapX + dx;
   const ny = game.mapY + dy;
   const tiles = game.worldTiles;
-  if (!tiles?.length || !WorldView.isWalkable(tiles, nx, ny)) {
-    spawnFx("受阻", $("world-canvas"));
+  if (!tilesOk(tiles) || !WorldView.isWalkable(tiles, nx, ny)) {
+    spawnFx("Blocked", $("world-canvas"));
     return;
   }
   if (RPG.monsterAt(game, nx, ny)) {
-    spawnFx("無目標", $("world-canvas"));
+    spawnFx("Blocked", $("world-canvas"));
     return;
   }
   if (dx < 0) facing = "left";
@@ -310,20 +299,16 @@ function moveHero(dx, dy) {
 }
 
 function goToHome() {
-  if (game?.inBattle) {
-    game.inBattle = 0;
-    game.engagedMonsterId = 0;
-    game.undo = [];
-  }
   game = null;
+  resetPending = false;
   $("game").classList.add("hidden");
   $("setup").classList.remove("hidden");
-  $("menu-overlay").classList.add("hidden");
 }
 
 function restartGame() {
+  resetPending = false;
   localStorage.removeItem(STORAGE_KEY);
-  game = RPG.newGame(selectedHeroNames());
+  game = RPG.newGame({ jobId: selectedJobId() });
   syncMapFromEngine();
   saveState(game);
   $("game").classList.remove("hidden");
@@ -332,50 +317,68 @@ function restartGame() {
   startAnimLoop();
 }
 
-function run(cmd, arg, anchor) {
-  if (!game) return;
-  const battleCmd = cmd === "attack" && game.inBattle;
-  RPG.applyCommand(game, battleCmd ? "battle_attack" : cmd, arg);
-  saveState(game);
-  const view = RPG.toView(game);
-  renderView(view, game.message);
+function scheduleResetAfterDeath() {
+  if (resetPending) return;
+  resetPending = true;
+  spawnFx("Game Over", $("world-canvas"));
+  setTimeout(() => restartGame(), 900);
 }
 
-$("hero-slots").addEventListener("click", (e) => {
-  const btn = e.target.closest(".slot-pick");
+function run(cmd, arg) {
+  if (!game || resetPending) return;
+  RPG.applyCommand(game, cmd, arg);
+  const view = RPG.toView(game);
+  renderView(view, game.message);
+  if (game.gameOver || view.game_over || (view.players[0] && view.players[0].hp <= 0)) {
+    scheduleResetAfterDeath();
+    return;
+  }
+  saveState(game);
+}
+
+function mapAttack() {
+  if (!game || resetPending) return;
+  run("attack");
+}
+
+$("class-grid").addEventListener("click", (e) => {
+  const btn = e.target.closest(".class-pick");
   if (!btn) return;
-  const onCount = document.querySelectorAll(".slot-pick.on").length;
-  if (btn.classList.contains("on") && onCount <= 1) return;
-  btn.classList.toggle("on");
+  document.querySelectorAll(".class-pick").forEach((b) => b.classList.remove("on"));
+  btn.classList.add("on");
+  updateSetupStory(btn.getAttribute("data-job"));
 });
 
 $("btnNew").addEventListener("click", () => {
-  game = RPG.newGame(selectedHeroNames());
+  resetPending = false;
+  game = RPG.newGame({ jobId: selectedJobId() });
   syncMapFromEngine();
+  ensureWorld();
   saveState(game);
   $("game").classList.remove("hidden");
   $("setup").classList.add("hidden");
-  const view = RPG.toView(game);
-  renderView(view, game.message);
+  paintMapAfterShow();
   startAnimLoop();
 });
 
 $("btnResume").addEventListener("click", () => {
   game = loadState();
   if (!game) {
-    spawnFx("沒有存檔");
+    spawnFx("No save");
     return;
   }
+  resetPending = false;
+  ensureWorld();
   syncMapFromEngine();
   $("game").classList.remove("hidden");
   $("setup").classList.add("hidden");
-  renderView(RPG.toView(game));
+  paintMapAfterShow();
   startAnimLoop();
 });
 
 $("btnClearSave").addEventListener("click", () => {
   localStorage.removeItem(STORAGE_KEY);
-  spawnFx("已清除", $("btnClearSave"));
+  spawnFx("Cleared", $("btnClearSave"));
 });
 
 $("btn-home").addEventListener("click", () => {
@@ -383,96 +386,43 @@ $("btn-home").addEventListener("click", () => {
   goToHome();
 });
 
-$("btn-restart").addEventListener("click", () => {
-  restartGame();
-});
+$("btn-restart").addEventListener("click", () => restartGame());
 
-$("btn-menu").addEventListener("click", () => $("menu-overlay").classList.remove("hidden"));
-$("menu-close").addEventListener("click", () => $("menu-overlay").classList.add("hidden"));
-$("menu-overlay").addEventListener("click", (e) => {
-  if (e.target === $("menu-overlay")) $("menu-overlay").classList.add("hidden");
-});
-
-document.querySelectorAll(".menu-cell").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    const m = btn.getAttribute("data-menu");
-    $("menu-overlay").classList.add("hidden");
-    $("rail-party").classList.toggle("hidden", m !== "party" && m !== "items");
-    $("rail-quests").classList.toggle("hidden", m !== "quests");
-    if (m === "save") saveState(game);
-    if (m === "home") {
-      if (game) saveState(game);
-      goToHome();
-      return;
-    }
-    if (m === "restart") {
-      restartGame();
-      return;
-    }
-    spawnFx(m === "save" ? "存檔" : "", btn);
-  });
-});
+$("btn-map-atk").addEventListener("click", () => mapAttack());
 
 $("dpad").addEventListener("click", (e) => {
   const btn = e.target.closest(".dpad-btn");
-  if (!btn || !game || btn.disabled) return;
+  if (!btn || !game) return;
   const dir = btn.getAttribute("data-dir");
-  if (dir === "attack") {
-    run("attack", null, $("world-canvas"));
-    return;
-  }
-  const dmap = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
-  const d = dmap[dir];
+  const map = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+  const d = map[dir];
   if (d) moveHero(d[0], d[1]);
 });
 
-$("skill-grid").addEventListener("click", (e) => {
-  const btn = e.target.closest("[data-skill]");
-  if (!btn || btn.disabled) return;
-  run(btn.getAttribute("data-skill"), null, btn);
-});
-
-window.addEventListener("keydown", (e) => {
-  if (!game || $("game").classList.contains("hidden")) return;
-  const view = RPG.toView(game);
-  if (view.phase === "battle") {
-    const kmap = { j: "attack", z: "attack", a: "attack", s: "defend", f: "flee", r: "undo", "1": "use" };
-    const k = e.key.toLowerCase();
-    if (kmap[k]) {
-      if (k === "1") run("use", 0);
-      else run(kmap[k]);
-      e.preventDefault();
-    }
-    return;
-  }
-  const moves = {
+document.addEventListener("keydown", (e) => {
+  if (!$("game") || $("game").classList.contains("hidden") || !game || resetPending) return;
+  const keys = {
     ArrowUp: [0, -1],
     ArrowDown: [0, 1],
     ArrowLeft: [-1, 0],
     ArrowRight: [1, 0],
-    w: [0, -1],
-    s: [0, 1],
-    a: [-1, 0],
-    d: [1, 0],
+    KeyW: [0, -1],
+    KeyS: [0, 1],
+    KeyA: [-1, 0],
+    KeyD: [1, 0],
   };
-  const m = moves[e.key];
-  if (m) {
-    moveHero(m[0], m[1]);
+  if (e.code === "Space" || e.key === "j" || e.key === "J") {
     e.preventDefault();
+    mapAttack();
+    return;
   }
-  if (e.key === " " || e.key === "j" || e.key === "z") {
-    run("attack", null, $("world-canvas"));
+  const d = keys[e.code];
+  if (d) {
     e.preventDefault();
+    moveHero(d[0], d[1]);
   }
 });
 
-window.addEventListener("DOMContentLoaded", () => {
-  game = loadState();
-  if (game) {
-    $("game").classList.remove("hidden");
-    $("setup").classList.add("hidden");
-    syncMapFromEngine();
-    renderView(RPG.toView(game));
-    startAnimLoop();
-  }
-});
+updateSetupStory("warrior");
+paintHeroPortraits($("class-grid"));
+startAnimLoop();
