@@ -6,7 +6,7 @@
 
 ## 專案介紹
 
-瀏覽器輸入指令（攻擊、防禦、使用道具等）。**線上**：`play/` 內建與 C 版對齊的遊戲邏輯，可部署到 **Vercel** 靜態託管，開網址即可遊玩（無需 Python／編譯 C）。**本機**：Flask 呼叫 `build/rpg_engine`，回傳 JSON 狀態；`static/` 為舊版 Flask 用前端。
+瀏覽器開啟 **`play/index.html`**（或經本機簡易 HTTP 伺服器）即可遊玩圖形介面版：邏輯在 `play/engine.js`，與 `src/` C 版規則對齊。**本機後端**：Flask 呼叫 `build/rpg_engine`；`static/` 為舊版表單式前端，可改指向 `play/`。
 
 ---
 
@@ -51,14 +51,12 @@
 ```text
 RPG-Egine/
 ├── README.md
-├── vercel.json               # Vercel：建置後輸出 dist/（由 play/ 複製）
-├── package.json              # npm run vercel-build
-├── play/                     # 瀏覽器版（Vercel 靜態託管，開網址即玩）
+├── play/                     # 圖形介面遊戲（雙擊 index.html 或用本機伺服器開啟）
 │   ├── index.html
 │   ├── style.css
 │   ├── engine.js
 │   └── app.js
-├── src/                      # C RPG 核心（本機 / 課程用）
+├── src/                      # C RPG 核心
 │   ├── character.h / .c    # struct Character、多角色管理
 │   ├── inventory.c           # 背包 linked list
 │   ├── quest_queue.c         # 任務 queue
@@ -66,7 +64,7 @@ RPG-Egine/
 │   ├── map.c                 # 地圖／探索
 │   └── main_cli.c          # 可選：純 C 除錯用 main
 ├── web/                      # Flask 後端
-│   ├── requirements.txt      # 本機 pip 用（勿放於倉庫根目錄，以免 Vercel 誤判 Flask）
+│   ├── requirements.txt      # 本機 pip：flask
 │   ├── app.py
 │   └── bridge.py             # 呼叫 C 可執行檔或載入 .so
 ├── static/                   # 前端（HTML/CSS/JS）
@@ -121,42 +119,165 @@ flowchart TB
 
 ---
 
+## 前置需求（macOS / Windows）
+
+依你要玩的版本選擇；**只玩圖形版** 與 **本機 Flask + C** 需求不同。
+
+### 只玩瀏覽器圖形版（`play/`，建議）
+
+| 項目 | macOS | Windows |
+|------|--------|---------|
+| 作業系統 | macOS 11+（建議 12+） | Windows 10 / 11（64 位元） |
+| 瀏覽器 | Safari、Chrome、Edge、Firefox 近期版 | Chrome、Edge、Firefox 近期版 |
+| 其它 | 無需安裝 C / Python | 無需安裝 C / Python |
+| 可選 | 見下方「本機開啟網址」 | 同上，或安裝 [Python](https://www.python.org/downloads/) 勾選「Add to PATH」 |
+
+進度存在瀏覽器 **localStorage**；換電腦或清除網站資料會消失。
+
+### 本機 Flask + C 引擎（課程／對照用）
+
+| 項目 | macOS | Windows |
+|------|--------|---------|
+| **C 編譯器** | Xcode Command Line Tools：`xcode-select --install`（內建 `clang`） | [MinGW-w64](https://www.mingw-w64.org/) 或 Visual Studio「使用 C++ 的桌面開發」取得 `gcc` |
+| **Python** | 3.10+（可用 `brew install python` 或 [python.org](https://www.python.org/downloads/)） | 3.10+（安裝時勾選 **Add python.exe to PATH**） |
+| **pip** | 隨 Python 安裝 | 隨 Python 安裝 |
+| **Make** | 隨 Command Line Tools 提供 | 可用 `mingw32-make`，或於 Git Bash / WSL 內執行 `make` |
+| **Git** | 可選（`xcode-select` 或 `brew install git`） | 可選（[Git for Windows](https://git-scm.com/download/win)） |
+
+---
+
+## 畫面需求（介面規格）
+
+**原則：不以文字敘述推進遊戲。** 狀態與結果用圖示、血條、動畫、音效（可選）表達；引擎內部仍可保留 `message` 字串，但 `play/` **不顯示長句或任務說明文字**。
+
+以下為專案應具備的**視覺與操作**目標，供實作 `play/` 或日後精靈圖版本時對照。
+
+### 1. 地圖系統
+
+| 需求 | 說明 |
+|------|------|
+| 背景地圖 | 探索模式顯示可辨識的**場景底圖**（瓦片圖、插畫或 CSS 場景），而非僅抽象按鈕。 |
+| 角色可移動 | 玩家以**方向操作**改變地圖上的位置（見下節 sprite），座標與引擎 `map.x / map.y` 同步。 |
+| 遭遇觸發 | 移動或踩格可觸發戰鬥、拾取、任務點等（邏輯仍由 `engine.js` / C 核心決定）。 |
+
+**目前 `play/` 狀態**：**固定地圖**（開局生成後不變）、**地圖上固定魔物**、方向鍵移動；**⚔／空白／J** 對相鄰魔物開戰；HUD **⌂ 主頁**、**↻ 重新開始**。
+
+### 2. 角色顯示（Sprite）
+
+| 需求 | 說明 |
+|------|------|
+| 角色 Sprite | 地圖上顯示**角色圖像**（精靈圖或動畫幀），取代僅頭像圓圈。 |
+| 四向移動 | 支援 **上／下／左／右** 移動；可依方向切換行走動畫（至少 4 方向靜態幀）。 |
+| 操作方式 | 鍵盤方向鍵或 WASD；行動裝置可選虛擬方向鍵。 |
+
+**目前 `play/` 狀態**：地圖上有 **簡易 sprite**（Canvas 繪製），支援 **方向鍵／虛擬方向鍵** 四向移動。
+
+### 3. 戰鬥畫面（場景切換）
+
+| 需求 | 說明 |
+|------|------|
+| 獨立戰鬥 UI | 進入戰鬥時**整頁或主舞台切換**為戰鬥版面，與探索地圖明確分離。 |
+| 雙方呈現 | 顯示我方角色與敵方單位（圖像或大型立繪 + 狀態）。 |
+| 指令區 | 攻擊、防禦、道具、逃跑、回溯等以**可點擊技能／道具區**呈現。 |
+
+**目前 `play/` 狀態**：探索／戰鬥會**切換主舞台區塊**（VS 競技場 + 符印技能），已具備「另一套 UI」，但**非地圖上的即時戰鬥視角**。
+
+### 4. 介面元素（常駐 HUD）
+
+| 元素 | 說明 |
+|------|------|
+| 血量條（HP） | 角色與（戰鬥中）敵方皆需**可視化 HP 比例條**，數值可選顯示在條旁或 tooltip。 |
+| 魔力條（MP） | 我方角色顯示 **MP 條**；技能若消耗 MP 需與條連動。 |
+| 選單 | 提供**選單入口**（例如：背包、任務、隊伍切換、存檔／讀檔、設定）；可為側欄、底部列或暫停選單。 |
+
+**目前 `play/` 狀態**：**HP／MP 條**、**☰ 選單**（圖示格）、道具藥水瓶、任務僅 **圓環進度 + 圖示**；事件回饋為 **畫面中央／目標處特效**，無文字 Toast。
+
+### 畫面流程（建議）
+
+```mermaid
+stateDiagram-v2
+  [*] --> 標題選單
+  標題選單 --> 地圖探索: 開新局／讀檔
+  地圖探索 --> 地圖探索: 方向鍵移動
+  地圖探索 --> 戰鬥UI: 遭遇戰
+  戰鬥UI --> 地圖探索: 勝利／逃跑
+  戰鬥UI --> 標題選單: 全滅／放棄
+```
+
+### 建議資源目錄（日後擴充）
+
+```text
+play/assets/
+├── maps/           # 地圖底圖、瓦片集
+├── sprites/
+│   ├── hero/       # 四向行走圖
+│   └── monsters/   # 敵人圖
+└── ui/             # 血條框、選單面板、按鈕
+```
+
+---
+
 ## 製作方式
 
-### 線上版：Vercel（免本機 Python／C）
+### 瀏覽器圖形版（`play/`，免編譯）
 
-1. 將專案推上 GitHub。
-2. 在 [Vercel](https://vercel.com) 建立新專案並 Import 此 repo（**Root Directory 使用儲存庫根目錄**）。
-3. 建置會執行 `npm run vercel-build`：把 `play/` 複製到 `dist/` 後作為靜態網站發佈（見根目錄 `vercel.json`）。**請勿在倉庫根目錄放置 `requirements.txt`**，否則 Vercel 會誤判為 Flask 專案並尋找 `app.py` 入口而建置失敗；Python 依賴已改放在 `web/requirements.txt`（僅本機用）。
-4. 部署完成後，開啟 Vercel 提供的網址即可遊玩。進度存在瀏覽器 **localStorage**（僅該瀏覽器本機；換裝置或清除網站資料會消失）。
+1. 雙擊 **`play/index.html`**，或用本機 HTTP 伺服器（見下表）。
+2. 進度儲存在瀏覽器 **localStorage**。
 
-#### 對照：Vercel 官方「Flask on Vercel」文件
+**本機開啟網址（依你在哪個資料夾執行 `python3 -m http.server`）：**
 
-依 [Deploy a Flask app on Vercel](https://vercel.com/docs/frameworks/backend/flask)（Backend / Flask）：
+| 終端機目前目錄 | 指令 | 瀏覽器請開 |
+|----------------|------|------------|
+| 已在 **`play/`** 內 | `python3 -m http.server 8000` | **http://127.0.0.1:8000/** 或 **http://127.0.0.1:8000/index.html** |
+| 在專案根目錄 **`RPG-Egine/`** | `python3 -m http.server 8000` | **http://127.0.0.1:8000/play/** |
 
-- Vercel 會在下列**支援的入口檔**尋找名為 **`app`** 的 Flask 實例：`app.py`、`index.py`、`server.py`、`main.py`、`wsgi.py`、`asgi.py`，或同檔名放在 `src/`、`app/`、`api/` 底下。
-- 若應用程式在其它路徑（例如本專案的 `web/app.py`），需在 **`pyproject.toml`** 設定 `[tool.vercel]` 的 **`entrypoint`**，例如 `entrypoint = "web.app:app"`（指向模組內的 `app` 變數）。
-- 在 Vercel 上提供靜態檔應使用倉庫的 **`public/**`**；官方說明不建議依賴 Flask 的 `app.static_folder` 作為主要靜態託管方式。
-- **`vercel.json` 或控制台裡設定的 Build Command** 優先於 `pyproject.toml` 裡 `[tool.vercel.scripts]` 的 `build` 腳本。
+若在 `play/` 裡卻開 `/play/` 會 **404**（伺服器根目錄就是 `play`，沒有再一層 `play` 資料夾）。
 
-**與本專案的關係**：線上版刻意走 **Node 建置 + `outputDirectory: dist`**（內容來自 `play/`），**不是** Flask Python Runtime。因此不要在倉庫根目錄放會觸發「Flask 專案」偵測的檔案（例如根目錄 `requirements.txt`），否則會出現 *No Flask entrypoint found*。本機若要跑 Flask + C，請使用 `web/requirements.txt` 與 `FLASK_APP=web.app`（見下方「本機版」）。
+**macOS（在 `play/` 內，你目前的情況）：**
+
+```bash
+cd /path/to/RPG-Egine/play
+python3 -m http.server 8000
+# 開 http://127.0.0.1:8000/
+```
+
+**macOS（在專案根目錄）：**
+
+```bash
+cd /path/to/RPG-Egine
+python3 -m http.server 8000
+# 開 http://127.0.0.1:8000/play/
+```
+
+**Windows（PowerShell，在 `play` 內）：**
+
+```powershell
+cd C:\path\to\RPG-Egine\play
+py -m http.server 8000
+# 開 http://127.0.0.1:8000/
+```
 
 ---
 
 ### 本機版：Flask + C 引擎
 
-#### 前置需求
-
-- **C 編譯器**：GCC 或 Clang（macOS 通常已具備 `clang`）
-- **Python 3.10+** 與 **pip**
-- **Git**
-
 ### 1. 建立虛擬環境並安裝 Flask
+
+**macOS：**
 
 ```bash
 cd /path/to/RPG-Egine
 python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate
+pip install -r web/requirements.txt
+```
+
+**Windows（PowerShell 或 CMD）：**
+
+```powershell
+cd C:\path\to\RPG-Egine
+py -m venv .venv
+.\.venv\Scripts\activate
 pip install -r web/requirements.txt
 ```
 
@@ -172,8 +293,17 @@ make                          # 或: cmake -B build && cmake --build build
 
 ### 3. 啟動 Flask
 
+**macOS / Linux：**
+
 ```bash
-export FLASK_APP=web.app      # 依實際模組路徑調整
+export FLASK_APP=web.app
+flask run --host 127.0.0.1 --port 5000
+```
+
+**Windows（PowerShell，venv 已啟用）：**
+
+```powershell
+$env:FLASK_APP = "web.app"
 flask run --host 127.0.0.1 --port 5000
 ```
 
@@ -244,5 +374,7 @@ flask run --host 127.0.0.1 --port 5000
 |------|----------------|
 | 架構與資料結構 | [核心架構](#核心架構)、[系統架構圖](#系統架構圖) |
 | 目錄與 GitHub 規範 | [GitHub 工程規範與目錄結構](#github-工程規範與目錄結構) |
-| 環境與編譯執行 | [製作方式](#製作方式)（含 Vercel 靜態與官方 Flask 對照） |
+| 前置需求（mac / Win） | [前置需求](#前置需求macos--windows) |
+| 畫面與 UI 規格 | [畫面需求](#畫面需求介面規格) |
+| 環境與編譯執行 | [製作方式](#製作方式) |
 | 遊戲流程與限制 | [遊玩規則](#遊玩規則) |
