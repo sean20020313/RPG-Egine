@@ -2,9 +2,58 @@
  * HD-2D style: retro pixel sprites + modern lighting (vignette, bloom, depth)
  */
 (function (global) {
-  const TILE = 32;
+  const TILE = 64;
   const COLS = 15;
   const ROWS = 10;
+
+  /** 0 草地 1 造景 2 障礙 3 河流 4 村莊地面 5 建築 6 橋 */
+  const T = { FLOOR: 0, PROP: 1, WALL: 2, WATER: 3, VILLAGE: 4, BUILDING: 5, BRIDGE: 6 };
+
+  function isBlockingTile(k) {
+    return k === T.WALL || k === T.WATER || k === T.BUILDING;
+  }
+
+  function inMap(x, y) {
+    return x >= 0 && y >= 0 && x < COLS && y < ROWS;
+  }
+
+  function isBossCell(x, y) {
+    const { x: cx, y: cy } = MAP_CENTER;
+    return Math.abs(x - cx) <= 1 && Math.abs(y - cy) <= 1;
+  }
+
+  function isSpawnCell(x, y) {
+    return x <= 2 && y <= 2;
+  }
+
+  function mapRand(seed) {
+    return (Math.imul(seed >>> 0, 1103515245) + 12345) >>> 0;
+  }
+
+  function setTile(map, x, y, val) {
+    if (!inMap(x, y)) return;
+    if (isBossCell(x, y) || isSpawnCell(x, y)) return;
+    if (map[y][x] === T.WALL) return;
+    map[y][x] = val;
+  }
+
+  function setBridge(map, x, y) {
+    if (!inMap(x, y) || isBossCell(x, y) || isSpawnCell(x, y)) return;
+    if (map[y][x] === T.WALL) return;
+    map[y][x] = T.BRIDGE;
+  }
+
+  function carveRiverH(map, y, x0, x1) {
+    const a = Math.min(x0, x1);
+    const b = Math.max(x0, x1);
+    for (let x = a; x <= b; x++) setTile(map, x, y, T.WATER);
+  }
+
+  function carveRiverV(map, x, y0, y1) {
+    const a = Math.min(y0, y1);
+    const b = Math.max(y0, y1);
+    for (let y = a; y <= b; y++) setTile(map, x, y, T.WATER);
+  }
 
   const JOBS = [
     { id: "warrior", name: "Warrior", hue: 220, accent: "#6b8cff", cape: "#3a4a8a" },
@@ -13,7 +62,70 @@
     { id: "thief", name: "Thief", hue: 160, accent: "#5ee8a8", cape: "#1a5040" },
   ];
 
-  const MONSTER_KINDS = ["slime", "goblin", "wolf", "gargoyle", "bat", "skeleton", "spider", "orc"];
+  const MONSTER_KINDS = [
+    "slime",
+    "goblin",
+    "wolf",
+    "gargoyle",
+    "bat",
+    "skeleton",
+    "spider",
+    "orc",
+    "meadow_fairy",
+    "snow_yeti",
+    "lava_imp",
+    "ruin_wraith",
+    "crystal_shard",
+  ];
+
+  /** 各關卡專屬怪物池（僅該關出現的種類與名稱） */
+  global.STAGE_MONSTER_POOLS = [
+    {
+      theme: "meadow",
+      entries: [
+        { typeIndex: 0, name: "草原史萊姆" },
+        { typeIndex: 1, name: "野草哥布林" },
+        { typeIndex: 2, name: "疾風野狼" },
+        { typeIndex: 8, name: "花蔓妖" },
+      ],
+    },
+    {
+      theme: "snow",
+      entries: [
+        { typeIndex: 4, name: "冰霜蝙蝠" },
+        { typeIndex: 5, name: "凍骨士兵" },
+        { typeIndex: 2, name: "雪原狼" },
+        { typeIndex: 9, name: "霜雪人" },
+      ],
+    },
+    {
+      theme: "volcano",
+      entries: [
+        { typeIndex: 6, name: "熔岩蜘蛛" },
+        { typeIndex: 7, name: "炎獸人" },
+        { typeIndex: 3, name: "焦土石像" },
+        { typeIndex: 10, name: "火焰小鬼" },
+      ],
+    },
+    {
+      theme: "ruins",
+      entries: [
+        { typeIndex: 5, name: "遺跡骷髏" },
+        { typeIndex: 3, name: "斷垣石像" },
+        { typeIndex: 7, name: "遊蕩獸人" },
+        { typeIndex: 11, name: "古代幽靈" },
+      ],
+    },
+    {
+      theme: "crystal",
+      entries: [
+        { typeIndex: 0, name: "晶化史萊姆" },
+        { typeIndex: 4, name: "棱光蝙蝠" },
+        { typeIndex: 6, name: "晶網蜘蛛" },
+        { typeIndex: 12, name: "水晶碎靈" },
+      ],
+    },
+  ];
 
   function fillPix(ctx, x, y, w, h, color) {
     ctx.fillStyle = color;
@@ -37,7 +149,7 @@
     ];
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
-        if (map[y][x] === 2 || ids[y][x]) continue;
+        if (isBlockingTile(map[y][x]) || ids[y][x]) continue;
         const q = [[x, y]];
         ids[y][x] = nextId;
         while (q.length) {
@@ -46,7 +158,7 @@
             const nx = cx + dx;
             const ny = cy + dy;
             if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
-            if (map[ny][nx] === 2 || ids[ny][nx]) continue;
+            if (isBlockingTile(map[ny][nx]) || ids[ny][nx]) continue;
             ids[ny][nx] = nextId;
             q.push([nx, ny]);
           }
@@ -61,7 +173,7 @@
   function ensureMapConnectivity(map, startX, startY) {
     const sx = Math.max(1, Math.min(COLS - 2, startX | 0));
     const sy = Math.max(1, Math.min(ROWS - 2, startY | 0));
-    if (map[sy][sx] === 2) map[sy][sx] = 0;
+    if (isBlockingTile(map[sy][sx])) map[sy][sx] = T.FLOOR;
 
     const dirs = [
       [0, 1],
@@ -76,7 +188,7 @@
       let allOk = true;
       for (let y = 1; y < ROWS - 1 && allOk; y++) {
         for (let x = 1; x < COLS - 1; x++) {
-          if (map[y][x] !== 2 && regions[y][x] !== startRegion) {
+          if (!isBlockingTile(map[y][x]) && regions[y][x] !== startRegion) {
             allOk = false;
             break;
           }
@@ -87,16 +199,16 @@
       let opened = false;
       for (let y = 1; y < ROWS - 1 && !opened; y++) {
         for (let x = 1; x < COLS - 1; x++) {
-          if (map[y][x] !== 2) continue;
+          if (!isBlockingTile(map[y][x])) continue;
           const regionIds = new Set();
           for (const [dx, dy] of dirs) {
             const nx = x + dx;
             const ny = y + dy;
-            if (map[ny][nx] === 2) continue;
+            if (isBlockingTile(map[ny][nx])) continue;
             regionIds.add(regions[ny][nx]);
           }
           if (regionIds.size >= 2 && regionIds.has(startRegion)) {
-            map[y][x] = 0;
+            map[y][x] = T.FLOOR;
             opened = true;
             break;
           }
@@ -106,12 +218,12 @@
 
       for (let y = 1; y < ROWS - 1 && !opened; y++) {
         for (let x = 1; x < COLS - 1; x++) {
-          if (map[y][x] === 2 || regions[y][x] === startRegion) continue;
+          if (!isBlockingTile(map[y][x]) || regions[y][x] === startRegion) continue;
           for (const [dx, dy] of dirs) {
             const nx = x + dx;
             const ny = y + dy;
-            if (map[ny][nx] !== 2) continue;
-            map[ny][nx] = 0;
+            if (!isBlockingTile(map[ny][nx])) continue;
+            map[ny][nx] = T.FLOOR;
             opened = true;
             break;
           }
@@ -128,12 +240,103 @@
         const x = cx + dx;
         const y = cy + dy;
         if (x < 1 || y < 1 || x >= COLS - 1 || y >= ROWS - 1) continue;
-        map[y][x] = 0;
+        map[y][x] = T.FLOOR;
       }
     }
   }
 
-  function buildFixedMap(seed) {
+  const MAX_MAP_STAGES = 5;
+
+  const MAP_THEMES = [
+    {
+      id: "meadow",
+      name: "草原",
+      wallMod: 13,
+      decorMod: 5,
+      floorA: "#4a9a55",
+      floorB: "#3d8a48",
+      floorHi: "#7acc7a",
+      decorBase: "#2d6a38",
+      wallSide: "#6a7a50",
+      wallTop: "#9aaa70",
+      wallFront: "#7a8a58",
+      light: "rgba(255, 240, 200, 0.2)",
+      vignette: "rgba(20, 50, 30, 0.2)",
+      bg: "#243828",
+    },
+    {
+      id: "snow",
+      name: "雪原",
+      wallMod: 12,
+      decorMod: 6,
+      floorA: "#d0e4f0",
+      floorB: "#b8d0e0",
+      floorHi: "#f0f8ff",
+      decorBase: "#90b0c8",
+      wallSide: "#8098a8",
+      wallTop: "#e0eef8",
+      wallFront: "#a8b8c8",
+      light: "rgba(230, 245, 255, 0.25)",
+      vignette: "rgba(30, 50, 90, 0.2)",
+      bg: "#2a3848",
+    },
+    {
+      id: "volcano",
+      name: "熔岩",
+      wallMod: 11,
+      decorMod: 6,
+      floorA: "#5a3028",
+      floorB: "#4a2018",
+      floorHi: "#c06040",
+      decorBase: "#3a1810",
+      wallSide: "#4a2018",
+      wallTop: "#8a4838",
+      wallFront: "#602820",
+      light: "rgba(255, 120, 60, 0.24)",
+      vignette: "rgba(50, 10, 0, 0.35)",
+      bg: "#301008",
+    },
+    {
+      id: "ruins",
+      name: "遺跡",
+      wallMod: 10,
+      decorMod: 7,
+      floorA: "#7a7878",
+      floorB: "#686666",
+      floorHi: "#a0a0a8",
+      decorBase: "#484850",
+      wallSide: "#505058",
+      wallTop: "#a8a8b0",
+      wallFront: "#787880",
+      light: "rgba(255, 235, 200, 0.12)",
+      vignette: "rgba(0, 0, 0, 0.35)",
+      bg: "#1c1c24",
+    },
+    {
+      id: "crystal",
+      name: "水晶",
+      wallMod: 12,
+      decorMod: 5,
+      floorA: "#5848a0",
+      floorB: "#483888",
+      floorHi: "#b0a0f0",
+      decorBase: "#302070",
+      wallSide: "#403080",
+      wallTop: "#9080d8",
+      wallFront: "#6050a8",
+      light: "rgba(200, 180, 255, 0.26)",
+      vignette: "rgba(30, 0, 60, 0.3)",
+      bg: "#1a1030",
+    },
+  ];
+
+  function getThemeForStage(stage) {
+    const s = Math.max(1, Math.min(MAX_MAP_STAGES, stage | 0));
+    return MAP_THEMES[s - 1];
+  }
+
+  function generateMapTiles(seed, stage) {
+    const theme = getThemeForStage(stage);
     const map = [];
     let s = seed >>> 0 || 1;
     for (let y = 0; y < ROWS; y++) {
@@ -142,7 +345,9 @@
         s = (Math.imul(s, 1103515245) + 12345) >>> 0;
         if (x === 0 || y === 0 || x === COLS - 1 || y === ROWS - 1) row.push(2);
         else if (x <= 2 && y <= 2) row.push(0);
-        else row.push(s % 12 === 0 ? 2 : s % 6 === 0 ? 1 : 0);
+        else if (s % theme.wallMod === 0) row.push(2);
+        else if (s % theme.decorMod === 0) row.push(1);
+        else row.push(0);
       }
       map.push(row);
     }
@@ -150,53 +355,547 @@
     clearBossArena(map);
     ensureMapConnectivity(map, 1, 1);
     clearBossArena(map);
-    return map;
+    applyStageFeatures(map, s, theme);
+    return { tiles: map, theme };
+  }
+
+  function placeVillageLayout(map, cells) {
+    for (const [x, y, kind] of cells) setTile(map, x, y, kind);
+  }
+
+  function applyThemeRiver(map, theme) {
+    if (theme.id === "meadow") {
+      carveRiverH(map, 8, 3, 12);
+      setBridge(map, 9, 8);
+    } else if (theme.id === "snow") {
+      carveRiverV(map, 12, 2, 7);
+      setBridge(map, 12, 5);
+      carveRiverH(map, 2, 8, 11);
+    } else if (theme.id === "volcano") {
+      carveRiverV(map, 3, 2, 8);
+      setBridge(map, 3, 5);
+      carveRiverH(map, 8, 2, 6);
+    } else if (theme.id === "ruins") {
+      carveRiverH(map, 8, 2, 12);
+      setBridge(map, 10, 8);
+      carveRiverV(map, 2, 4, 7);
+    } else if (theme.id === "crystal") {
+      carveRiverH(map, 2, 2, 9);
+      setBridge(map, 7, 2);
+      carveRiverV(map, 11, 3, 7);
+    }
+  }
+
+  function applyThemeVillage(map, theme) {
+    if (theme.id === "meadow") {
+      placeVillageLayout(map, [
+        [2, 2, T.BUILDING],
+        [3, 2, T.BUILDING],
+        [2, 3, T.VILLAGE],
+        [3, 3, T.VILLAGE],
+        [4, 2, T.PROP],
+        [4, 3, T.PROP],
+        [2, 4, T.PROP],
+      ]);
+    } else if (theme.id === "snow") {
+      placeVillageLayout(map, [
+        [3, 2, T.BUILDING],
+        [4, 2, T.BUILDING],
+        [3, 3, T.VILLAGE],
+        [4, 3, T.VILLAGE],
+        [5, 2, T.PROP],
+        [2, 3, T.PROP],
+        [5, 3, T.PROP],
+      ]);
+    } else if (theme.id === "volcano") {
+      placeVillageLayout(map, [
+        [10, 2, T.BUILDING],
+        [11, 2, T.BUILDING],
+        [10, 3, T.VILLAGE],
+        [11, 3, T.VILLAGE],
+        [12, 2, T.PROP],
+        [9, 3, T.PROP],
+      ]);
+    } else if (theme.id === "ruins") {
+      placeVillageLayout(map, [
+        [2, 2, T.BUILDING],
+        [3, 2, T.VILLAGE],
+        [2, 3, T.VILLAGE],
+        [4, 2, T.BUILDING],
+        [3, 3, T.PROP],
+        [2, 4, T.PROP],
+      ]);
+    } else if (theme.id === "crystal") {
+      placeVillageLayout(map, [
+        [12, 2, T.BUILDING],
+        [13, 2, T.BUILDING],
+        [12, 3, T.VILLAGE],
+        [13, 3, T.VILLAGE],
+        [11, 2, T.PROP],
+        [12, 4, T.PROP],
+      ]);
+    }
+  }
+
+  function sprinkleExtraProps(map, seed, theme) {
+    let s = seed >>> 0;
+    const baseSpots = [
+      [5, 2],
+      [9, 2],
+      [2, 6],
+      [12, 6],
+      [5, 7],
+      [9, 7],
+      [6, 3],
+      [8, 3],
+      [4, 5],
+      [10, 5],
+      [2, 5],
+      [13, 4],
+      [6, 8],
+      [8, 8],
+      [3, 5],
+      [11, 4],
+    ];
+    const themeSpots = {
+      meadow: [
+        [8, 2],
+        [12, 3],
+        [6, 7],
+        [10, 7],
+        [4, 7],
+      ],
+      snow: [
+        [7, 2],
+        [8, 7],
+        [2, 7],
+        [6, 6],
+        [13, 2],
+      ],
+      volcano: [
+        [7, 3],
+        [9, 6],
+        [2, 7],
+        [13, 7],
+        [6, 2],
+      ],
+      ruins: [
+        [5, 3],
+        [10, 3],
+        [6, 5],
+        [11, 6],
+        [4, 6],
+      ],
+      crystal: [
+        [5, 5],
+        [9, 2],
+        [7, 6],
+        [3, 6],
+        [11, 7],
+      ],
+    };
+    const spots = baseSpots.concat(themeSpots[theme.id] || []);
+    for (const [x, y] of spots) {
+      s = mapRand(s);
+      const k = map[y][x];
+      if (k === T.FLOOR && s % 4 !== 0) setTile(map, x, y, T.PROP);
+      else if (k === T.VILLAGE && s % 5 === 0) setTile(map, x, y, T.PROP);
+    }
+  }
+
+  /** 河流、村莊、大量主題造景（橋可通行） */
+  function applyStageFeatures(map, seed, theme) {
+    applyThemeRiver(map, theme);
+    applyThemeVillage(map, theme);
+    sprinkleExtraProps(map, seed, theme);
+    ensureMapConnectivity(map, 1, 1);
+    clearBossArena(map);
+  }
+
+  function buildStageMap(seed, stage) {
+    return generateMapTiles(seed, stage);
+  }
+
+  function buildFixedMap(seed, stage) {
+    return generateMapTiles(seed, stage || 1).tiles;
   }
 
   function isWalkable(tiles, x, y) {
     if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return false;
-    return tiles[y][x] !== 2;
+    const k = tiles[y][x];
+    return k === T.FLOOR || k === T.PROP || k === T.VILLAGE || k === T.BRIDGE;
   }
 
   function getJob(jobId) {
     return JOBS.find((j) => j.id === jobId) || JOBS[0];
   }
 
-  /* —— HD-2D tiles (flat top + side depth) —— */
-  function drawGrassTile(ctx, px, py, tx, ty) {
-    const base = (tx + ty) % 2 === 0 ? "#4a8a52" : "#3d7a48";
+  /* —— 五關主題：地板／牆／造景 —— */
+  function drawFloorTile(ctx, px, py, tx, ty, theme) {
+    const t = theme || MAP_THEMES[0];
+    const base = (tx + ty) % 2 === 0 ? t.floorA : t.floorB;
     fillPix(ctx, px, py, TILE, TILE, base);
-    fillPix(ctx, px + 2, py + 2, TILE - 4, 2, "#5a9a62");
-    fillPix(ctx, px + 4 + ((tx * 3) % 12), py + 10 + ((ty * 2) % 8), 2, 3, "#6ab86a");
-    fillPix(ctx, px + 14 + ((ty * 2) % 10), py + 6, 2, 2, "#7acc7a");
+    fillPix(ctx, px + 2, py + 2, TILE - 4, 2, t.floorHi);
+    if (t.id === "meadow") {
+      if ((tx + ty) % 4 === 0) fillPix(ctx, px + 8, py + 12, 3, 4, "#f0e060");
+      if ((tx * ty) % 5 === 0) fillPix(ctx, px + 18, py + 8, 4, 3, "#88d070");
+    } else if (t.id === "snow") {
+      if ((tx + ty) % 3 === 0) fillPix(ctx, px + 6, py + 14, 4, 3, "#ffffff");
+    } else if (t.id === "volcano") {
+      if ((tx + ty) % 4 === 0) fillPix(ctx, px + 10, py + 14, 6, 2, "#ff6020");
+    } else if (t.id === "ruins") {
+      if ((tx + ty) % 5 === 0) fillPix(ctx, px + 12, py + 20, 4, 2, "#505058");
+    } else if (t.id === "crystal") {
+      if ((tx + ty) % 3 === 0) fillPix(ctx, px + 8, py + 10, 2, 4, "#d0c0ff");
+    }
   }
 
-  function drawForestTile(ctx, px, py) {
-    fillPix(ctx, px, py, TILE, TILE, "#2d5a3a");
-    fillPix(ctx, px + 4, py + 18, TILE - 8, 10, "#1a3828");
-    fillPix(ctx, px + 10, py + 4, 12, 12, "#3d8a50");
-    fillPix(ctx, px + 8, py + 2, 16, 8, "#52a868");
-    fillPix(ctx, px + 12, py + 8, 6, 6, "#2a6040");
+  function drawWallTile(ctx, px, py, theme) {
+    const t = theme || MAP_THEMES[0];
+    fillPix(ctx, px, py, TILE, TILE, t.wallSide);
+    fillPix(ctx, px, py, TILE, 6, t.wallTop);
+    fillPix(ctx, px, py + 6, TILE, TILE - 6, t.wallFront);
+    if (t.id === "snow") fillPix(ctx, px + 4, py, TILE - 8, 4, "#e8f4ff");
+    if (t.id === "volcano") fillPix(ctx, px + 6, py + 20, 8, 3, "#ff8040");
+    if (t.id === "ruins") fillPix(ctx, px + 2, py + 4, 6, 8, "#606068");
+    if (t.id === "crystal") fillPix(ctx, px + 8, py + 2, 4, 10, "#a090e8");
   }
 
-  function drawWallTile(ctx, px, py) {
-    const top = "#8a8278";
-    const side = "#5a5248";
-    const front = "#6a6258";
-    fillPix(ctx, px, py, TILE, TILE, side);
-    fillPix(ctx, px, py, TILE, 6, top);
-    fillPix(ctx, px, py + 6, TILE, TILE - 6, front);
-    fillPix(ctx, px + 2, py + 2, TILE - 4, 3, "#a09888");
-    fillPix(ctx, px + 4, py + 10, TILE - 8, 2, "#4a443c");
-    fillPix(ctx, px + 8, py + 14, 4, 4, "#3a342c");
+  function drawDecorTile(ctx, px, py, theme) {
+    const t = theme || MAP_THEMES[0];
+    fillPix(ctx, px, py, TILE, TILE, t.decorBase);
   }
 
-  function drawTileWorld(ctx, tx, ty, kind) {
+  function drawWaterTile(ctx, px, py, theme, frame) {
+    const wave = frame % 24 < 12;
+    if (theme.id === "meadow") {
+      fillPix(ctx, px, py, TILE, TILE, wave ? "#2878b8" : "#2068a8");
+      fillPix(ctx, px + 4, py + 8, TILE - 8, 6, wave ? "#48a8e8" : "#3898d8");
+      fillPix(ctx, px + 10, py + 14, 8, 4, "#60c0f0");
+    } else if (theme.id === "snow") {
+      fillPix(ctx, px, py, TILE, TILE, wave ? "#a8c8e8" : "#90b8d8");
+      fillPix(ctx, px + 6, py + 10, TILE - 12, 4, "#e8f4ff");
+      fillPix(ctx, px + 2, py + 18, 10, 3, "#c0d8f0");
+    } else if (theme.id === "volcano") {
+      fillPix(ctx, px, py, TILE, TILE, wave ? "#c04018" : "#902810");
+      fillPix(ctx, px + 4, py + 6, TILE - 8, 10, wave ? "#ff7030" : "#e05020");
+      fillPix(ctx, px + 12, py + 16, 8, 6, "#ffcc40");
+    } else if (theme.id === "ruins") {
+      fillPix(ctx, px, py, TILE, TILE, wave ? "#486878" : "#384858");
+      fillPix(ctx, px + 2, py + 12, TILE - 4, 4, "#608898");
+      fillPix(ctx, px + 14, py + 6, 4, 14, "#506070");
+    } else {
+      fillPix(ctx, px, py, TILE, TILE, wave ? "#5040a8" : "#403090");
+      fillPix(ctx, px + 6, py + 8, TILE - 12, 8, wave ? "#a090f0" : "#8070e0");
+      fillPix(ctx, px + 4, py + 20, 12, 3, "#d0c0ff");
+    }
+  }
+
+  function drawBridgeTile(ctx, px, py, theme) {
+    drawFloorTile(ctx, px, py, 0, 0, theme);
+    if (theme.id === "meadow") {
+      fillPix(ctx, px + 4, py + 10, TILE - 8, 10, "#8a6848");
+      fillPix(ctx, px + 6, py + 12, TILE - 12, 2, "#6a5038");
+      fillPix(ctx, px + 8, py + 8, 4, 14, "#5a4030");
+    } else if (theme.id === "snow") {
+      fillPix(ctx, px + 4, py + 12, TILE - 8, 8, "#b0c0d0");
+      fillPix(ctx, px + 6, py + 14, TILE - 12, 3, "#90a8b8");
+    } else if (theme.id === "volcano") {
+      fillPix(ctx, px + 4, py + 10, TILE - 8, 12, "#4a3028");
+      fillPix(ctx, px + 6, py + 12, TILE - 12, 4, "#c06030");
+    } else if (theme.id === "ruins") {
+      fillPix(ctx, px + 2, py + 10, TILE - 4, 10, "#787880");
+      fillPix(ctx, px + 8, py + 12, 6, 8, "#909098");
+    } else {
+      fillPix(ctx, px + 4, py + 10, TILE - 8, 10, "#7060c0");
+      fillPix(ctx, px + 8, py + 12, 8, 6, "#c0b0ff");
+    }
+  }
+
+  function drawVillageFloorTile(ctx, px, py, theme) {
+    if (theme.id === "meadow") {
+      fillPix(ctx, px, py, TILE, TILE, "#c8a868");
+      fillPix(ctx, px + 4, py + 4, TILE - 8, TILE - 8, "#b89858");
+      fillPix(ctx, px + 8, py + 20, 6, 4, "#9a7848");
+    } else if (theme.id === "snow") {
+      fillPix(ctx, px, py, TILE, TILE, "#d8e4f0");
+      fillPix(ctx, px + 2, py + 2, TILE - 4, TILE - 4, "#c8d8e8");
+    } else if (theme.id === "volcano") {
+      fillPix(ctx, px, py, TILE, TILE, "#5a4038");
+      fillPix(ctx, px + 4, py + 4, TILE - 8, TILE - 8, "#4a3028");
+    } else if (theme.id === "ruins") {
+      fillPix(ctx, px, py, TILE, TILE, "#8a8888");
+      fillPix(ctx, px + 2, py + 2, TILE - 4, TILE - 4, "#7a7878");
+      fillPix(ctx, px + 6, py + 6, 4, 4, "#686870");
+    } else {
+      fillPix(ctx, px, py, TILE, TILE, "#5848a0");
+      fillPix(ctx, px + 4, py + 4, TILE - 8, TILE - 8, "#6858b0");
+    }
+  }
+
+  function drawBuildingTile(ctx, px, py, theme, tx, ty) {
+    const v = (tx + ty) % 2;
+    if (theme.id === "meadow") {
+      fillPix(ctx, px + 6, py + 18, TILE - 12, 10, "#6a5038");
+      fillPix(ctx, px + 4, py + 6, TILE - 8, 14, v ? "#c87848" : "#b06840");
+      fillPix(ctx, px + 2, py + 2, TILE - 4, 6, "#a05030");
+      fillPix(ctx, px + 10, py + 10, 6, 6, "#f0e8c0");
+    } else if (theme.id === "snow") {
+      fillPix(ctx, px + 8, py + 20, TILE - 16, 8, "#8090a0");
+      fillPix(ctx, px + 4, py + 10, TILE - 8, 12, "#e8f0f8");
+      fillPix(ctx, px + 2, py + 4, TILE - 4, 8, "#d0e0f0");
+      fillPix(ctx, px + 10, py + 14, 8, 8, "#90a8c0");
+    } else if (theme.id === "volcano") {
+      fillPix(ctx, px + 6, py + 20, TILE - 12, 8, "#3a2018");
+      fillPix(ctx, px + 4, py + 8, TILE - 8, 14, "#5a4038");
+      fillPix(ctx, px + 2, py + 2, TILE - 4, 8, "#4a3028");
+      fillPix(ctx, px + 12, py + 4, 6, 4, "#ff8040");
+    } else if (theme.id === "ruins") {
+      fillPix(ctx, px + 4, py + 14, TILE - 8, 14, "#686870");
+      fillPix(ctx, px + 2, py + 2, TILE - 4, 14, "#909098");
+      fillPix(ctx, px + 8, py + 0, 8, 6, "#b0b0b8");
+      fillPix(ctx, px + 0, py + 8, 4, 10, "#585860");
+    } else {
+      fillPix(ctx, px + 6, py + 18, TILE - 12, 10, "#403080");
+      fillPix(ctx, px + 4, py + 6, TILE - 8, 14, "#8070d0");
+      fillPix(ctx, px + 2, py + 0, TILE - 4, 8, "#a090f0");
+      fillPix(ctx, px + 10, py + 8, 8, 10, "#e0d8ff");
+    }
+  }
+
+  function drawMeadowTree(ctx, variant) {
+    fillPix(ctx, -3, 6, 6, 8, "#5a4030");
+    fillPix(ctx, -12, -14, 24, 16, "#3a8a48");
+    fillPix(ctx, -8, -20, 16, 10, "#52a858");
+    if (variant % 2 === 0) fillPix(ctx, 6, -10, 8, 10, "#48a050");
+    fillPix(ctx, -6, -8, 4, 4, "#f0e878");
+  }
+
+  function drawSnowPine(ctx, frame) {
+    fillPix(ctx, -3, 8, 6, 6, "#607080");
+    fillPix(ctx, -10, -4, 20, 10, "#d8ecf8");
+    fillPix(ctx, -7, -14, 14, 12, "#b0d0e8");
+    fillPix(ctx, -4, -22, 8, 8, "#e8f4ff");
+    if (frame % 20 < 10) fillPix(ctx, 8, -18, 3, 3, "#ffffff");
+  }
+
+  function drawLavaRock(ctx, frame) {
+    fillPix(ctx, -14, 0, 28, 12, "#3a1810");
+    fillPix(ctx, -10, -8, 20, 10, "#5a3028");
+    const glow = frame % 16 < 8;
+    fillPix(ctx, -6, 4, 12, 4, glow ? "#ff9040" : "#c04020");
+    fillPix(ctx, 4, 2, 8, 3, "#ff6020");
+    fillPix(ctx, -12, -4, 4, 4, "#ffcc40");
+  }
+
+  function drawRuinPillar(ctx) {
+    fillPix(ctx, -6, 4, 12, 14, "#686870");
+    fillPix(ctx, -5, -16, 10, 18, "#909098");
+    fillPix(ctx, -3, -20, 6, 4, "#b0b0b8");
+    fillPix(ctx, -8, 0, 3, 6, "#505058");
+    fillPix(ctx, 5, 8, 10, 4, "#585860");
+  }
+
+  function drawCrystalCluster(ctx, frame) {
+    const pulse = frame % 12 < 6;
+    fillPix(ctx, -4, 8, 8, 6, "#403080");
+    fillPix(ctx, -10, -8, 8, 16, pulse ? "#c0b0ff" : "#9080e0");
+    fillPix(ctx, 0, -12, 10, 18, pulse ? "#e8e0ff" : "#b0a0f0");
+    fillPix(ctx, 6, -4, 6, 12, "#8070d0");
+    fillPix(ctx, -14, 0, 6, 10, "#7060c8");
+  }
+
+  function drawMeadowBush(ctx) {
+    fillPix(ctx, -10, 0, 20, 10, "#3a7a42");
+    fillPix(ctx, -6, -6, 12, 8, "#52a858");
+    fillPix(ctx, 4, -4, 8, 6, "#48a050");
+  }
+
+  function drawMeadowWell(ctx) {
+    fillPix(ctx, -8, 2, 16, 10, "#8a7868");
+    fillPix(ctx, -5, -6, 10, 8, "#6a5848");
+    fillPix(ctx, -3, -2, 6, 4, "#3898d8");
+    fillPix(ctx, -10, -8, 4, 12, "#5a4030");
+    fillPix(ctx, 6, -8, 4, 12, "#5a4030");
+  }
+
+  function drawHayBale(ctx) {
+    fillPix(ctx, -10, 2, 20, 10, "#d8b060");
+    fillPix(ctx, -8, 0, 16, 4, "#c8a050");
+    fillPix(ctx, -6, 4, 3, 6, "#b09040");
+    fillPix(ctx, 0, 4, 3, 6, "#b09040");
+  }
+
+  function drawIgloo(ctx) {
+    fillPix(ctx, -12, 4, 24, 10, "#e8f4ff");
+    fillPix(ctx, -10, -4, 20, 10, "#d0e8f8");
+    fillPix(ctx, -4, 0, 8, 6, "#90a8c0");
+  }
+
+  function drawSnowLamp(ctx, frame) {
+    fillPix(ctx, -2, 4, 4, 12, "#708090");
+    fillPix(ctx, -6, -8, 12, 10, frame % 20 < 10 ? "#fff8e0" : "#e8e0c0");
+    fillPix(ctx, -4, -4, 8, 4, "#c0d0e0");
+  }
+
+  function drawCharredStump(ctx) {
+    fillPix(ctx, -8, 4, 16, 8, "#3a2018");
+    fillPix(ctx, -5, -4, 10, 8, "#2a1810");
+    fillPix(ctx, -2, 0, 4, 4, "#ff6020");
+  }
+
+  function drawEmberVent(ctx, frame) {
+    fillPix(ctx, -10, 6, 20, 8, "#4a2018");
+    const g = frame % 14 < 7;
+    fillPix(ctx, -6, -6, 12, 10, g ? "#ff9040" : "#c04020");
+    fillPix(ctx, -2, -12, 4, 6, g ? "#ffcc60" : "#ff8040");
+  }
+
+  function drawRuinRubble(ctx) {
+    fillPix(ctx, -12, 4, 10, 8, "#686870");
+    fillPix(ctx, 0, 6, 12, 6, "#585860");
+    fillPix(ctx, -4, -2, 8, 6, "#787880");
+  }
+
+  function drawRuinArch(ctx) {
+    fillPix(ctx, -12, 0, 6, 16, "#909098");
+    fillPix(ctx, 6, 0, 6, 16, "#909098");
+    fillPix(ctx, -12, -12, 24, 6, "#a0a0a8");
+    fillPix(ctx, -6, -6, 12, 8, "#484850");
+  }
+
+  function drawGlowPool(ctx, frame) {
+    const p = frame % 16 < 8;
+    fillPix(ctx, -12, 4, 24, 8, p ? "#8070e8" : "#6050c8");
+    fillPix(ctx, -8, 0, 16, 6, p ? "#c0b0ff" : "#9080e8");
+    fillPix(ctx, -4, 2, 8, 4, "#e8e0ff");
+  }
+
+  function drawCrystalSpire(ctx, frame) {
+    const pulse = frame % 12 < 6;
+    fillPix(ctx, -4, 8, 8, 8, "#403080");
+    fillPix(ctx, -6, -16, 12, 24, pulse ? "#e8e0ff" : "#b0a0f0");
+    fillPix(ctx, -2, -8, 4, 8, "#ffffff");
+  }
+
+  function drawBonePile(ctx) {
+    fillPix(ctx, -10, 4, 8, 6, "#e8e0d0");
+    fillPix(ctx, -2, 2, 10, 8, "#d8d0c0");
+    fillPix(ctx, 4, 6, 8, 4, "#c8c0b0");
+  }
+
+  function drawTorchPost(ctx, frame) {
+    fillPix(ctx, -2, 2, 4, 14, "#5a5038");
+    const lit = frame % 18 < 9;
+    fillPix(ctx, -6, -10, 12, 10, lit ? "#ffb040" : "#c07030");
+    fillPix(ctx, -3, -6, 6, 6, lit ? "#ffe080" : "#e09040");
+  }
+
+  function drawShrineLamp(ctx, frame) {
+    fillPix(ctx, -2, 4, 4, 12, "#5040a0");
+    fillPix(ctx, -8, -10, 16, 12, frame % 16 < 8 ? "#e8e0ff" : "#c0b0ff");
+    fillPix(ctx, -4, -4, 8, 6, "#a090f0");
+  }
+
+  function drawSceneryProp(ctx, tx, ty, theme, frame) {
+    const v = (tx * 7 + ty * 11) % 6;
+    if (theme.id === "meadow") {
+      if (v === 0) drawMeadowTree(ctx, tx);
+      else if (v === 1) drawMeadowBush(ctx);
+      else if (v === 2) drawMeadowWell(ctx);
+      else if (v === 3) drawHayBale(ctx);
+      else drawMeadowTree(ctx, ty);
+    } else if (theme.id === "snow") {
+      if (v === 0) drawSnowPine(ctx, frame + tx);
+      else if (v === 1) drawIgloo(ctx);
+      else if (v === 2) drawSnowLamp(ctx, frame);
+      else if (v === 3) drawMeadowBush(ctx);
+      else drawSnowPine(ctx, frame + ty);
+    } else if (theme.id === "volcano") {
+      if (v === 0) drawLavaRock(ctx, frame + ty);
+      else if (v === 1) drawEmberVent(ctx, frame);
+      else if (v === 2) drawCharredStump(ctx);
+      else if (v === 3) drawBonePile(ctx);
+      else drawLavaRock(ctx, frame + tx);
+    } else if (theme.id === "ruins") {
+      if (v === 0) drawRuinPillar(ctx);
+      else if (v === 1) drawRuinRubble(ctx);
+      else if (v === 2) drawRuinArch(ctx);
+      else if (v === 3) drawTorchPost(ctx, frame);
+      else drawRuinPillar(ctx);
+    } else if (theme.id === "crystal") {
+      if (v === 0) drawCrystalCluster(ctx, frame + tx + ty);
+      else if (v === 1) drawGlowPool(ctx, frame);
+      else if (v === 2) drawCrystalSpire(ctx, frame);
+      else if (v === 3) drawShrineLamp(ctx, frame);
+      else drawCrystalCluster(ctx, frame);
+    }
+  }
+
+  function drawMapScenery(ctx, tiles, frame, theme) {
+    if (!tiles?.length || !theme) return;
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        if (tiles[y][x] !== T.PROP) continue;
+        const cx = x * TILE + TILE / 2;
+        const cy = y * TILE + TILE / 2 + 4;
+        ctx.save();
+        ctx.translate(cx, cy);
+        drawSceneryProp(ctx, x, y, theme, frame);
+        ctx.restore();
+      }
+    }
+    drawStageBackdrop(ctx, theme, frame);
+  }
+
+  function drawStageBackdrop(ctx, theme, frame) {
+    const w = COLS * TILE;
+    const h = ROWS * TILE;
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    if (theme.id === "meadow") {
+      fillPix(ctx, 8, 8, 48, 28, "#6ab86a");
+      fillPix(ctx, w - 56, 8, 44, 24, "#5aaa60");
+      fillPix(ctx, 24, h - 36, w - 48, 12, "#2878b8");
+      fillPix(ctx, 40, 20, 28, 16, "#c87848");
+      fillPix(ctx, w - 72, 24, 24, 14, "#b06840");
+    } else if (theme.id === "snow") {
+      fillPix(ctx, 4, 4, w - 8, 10, "#e0eef8");
+      fillPix(ctx, w - 52, 12, 36, 20, "#d0e8f8");
+      fillPix(ctx, 16, h - 32, 40, 10, "#a8c8e8");
+      if (frame % 30 < 15) fillPix(ctx, 80, 24, 6, 6, "#ffffff");
+      if (frame % 40 < 20) fillPix(ctx, 200, 40, 5, 5, "#ffffff");
+    } else if (theme.id === "volcano") {
+      ctx.fillStyle = "rgba(255, 80, 30, 0.18)";
+      ctx.fillRect(0, h - 48, w, 48);
+      fillPix(ctx, w / 2 - 40, h - 32, 80, 10, "#ff6020");
+      fillPix(ctx, 32, 16, 36, 18, "#5a4038");
+      fillPix(ctx, w - 68, 20, 32, 16, "#4a3028");
+    } else if (theme.id === "ruins") {
+      fillPix(ctx, 16, 12, 28, 44, "#585860");
+      fillPix(ctx, w - 52, 16, 24, 40, "#505058");
+      fillPix(ctx, 48, h - 28, w - 96, 8, "#486878");
+      fillPix(ctx, 28, 24, 20, 12, "#909098");
+    } else if (theme.id === "crystal") {
+      const pulse = frame % 20 < 10;
+      fillPix(ctx, 12, 12, 12, 32, pulse ? "#c0b0ff" : "#8070d0");
+      fillPix(ctx, w - 32, 16, 14, 36, pulse ? "#e8e0ff" : "#9080e8");
+      fillPix(ctx, 40, h - 24, w - 80, 8, pulse ? "#6050c8" : "#5040a8");
+      fillPix(ctx, w - 80, 20, 24, 14, "#8070d0");
+    }
+    ctx.restore();
+  }
+
+  function drawTileWorld(ctx, tx, ty, kind, theme, frame) {
     const px0 = tx * TILE;
     const py0 = ty * TILE;
-    if (kind === 2) drawWallTile(ctx, px0, py0);
-    else if (kind === 1) drawForestTile(ctx, px0, py0);
-    else drawGrassTile(ctx, px0, py0, tx, ty);
+    if (kind === T.WALL) drawWallTile(ctx, px0, py0, theme);
+    else if (kind === T.WATER) drawWaterTile(ctx, px0, py0, theme, frame || 0);
+    else if (kind === T.BRIDGE) drawBridgeTile(ctx, px0, py0, theme);
+    else if (kind === T.VILLAGE) drawVillageFloorTile(ctx, px0, py0, theme);
+    else if (kind === T.BUILDING) drawBuildingTile(ctx, px0, py0, theme, tx, ty);
+    else if (kind === T.PROP) drawDecorTile(ctx, px0, py0, theme);
+    else drawFloorTile(ctx, px0, py0, tx, ty, theme);
   }
 
   function drawEntityShadow(ctx, cx, cy, w, h) {
@@ -476,8 +1175,61 @@
     fillPix(ctx, 1, 10, 5, 8, "#505060");
   }
 
-  function drawMonsterBody(ctx, typeIndex, frame) {
-    const kind = MONSTER_KINDS[typeIndex % MONSTER_KINDS.length];
+  function drawMeadowFairy(ctx, frame) {
+    const bob = Math.sin(frame * 0.2) * 2;
+    fillPix(ctx, -3, 4 + bob, 6, 8, "#5a8048");
+    fillPix(ctx, -10, -6 + bob, 20, 14, "#7acc6a");
+    fillPix(ctx, -6, -14 + bob, 12, 10, "#98e878");
+    fillPix(ctx, -2, -10 + bob, 4, 4, "#ffe060");
+    fillPix(ctx, -14, -2 + bob, 6, 10, "#6ab85a");
+    fillPix(ctx, 8, -2 + bob, 6, 10, "#6ab85a");
+    fillPix(ctx, -8, -18 + bob, 16, 6, "#f0a0d0");
+  }
+
+  function drawSnowYeti(ctx, frame) {
+    const bob = Math.sin(frame * 0.12) > 0 ? 0 : 1;
+    fillPix(ctx, -12, 0 + bob, 24, 14, "#e8f4ff");
+    fillPix(ctx, -10, -12 + bob, 20, 14, "#d0e8f8");
+    fillPix(ctx, -6, -18 + bob, 12, 8, "#f8fcff");
+    fillPix(ctx, -4, -14 + bob, 4, 4, "#4060a0");
+    fillPix(ctx, 1, -14 + bob, 4, 4, "#4060a0");
+    fillPix(ctx, -14, 2 + bob, 5, 10, "#b8d0e8");
+    fillPix(ctx, 9, 2 + bob, 5, 10, "#b8d0e8");
+  }
+
+  function drawLavaImp(ctx, frame) {
+    const bob = Math.sin(frame * 0.25) > 0 ? 0 : 1;
+    fillPix(ctx, -6, 2 + bob, 12, 12, "#4a1810");
+    fillPix(ctx, -8, -10 + bob, 16, 12, "#c05030");
+    fillPix(ctx, -5, -16 + bob, 10, 8, "#802818");
+    fillPix(ctx, -3, -12 + bob, 3, 3, "#ffee40");
+    fillPix(ctx, 2, -12 + bob, 3, 3, "#ffee40");
+    fillPix(ctx, 10, -4 + bob, 8, 3, "#ff6020");
+    fillPix(ctx, -10, -6 + bob, 4, 8, "#ff9040");
+  }
+
+  function drawRuinWraith(ctx, frame) {
+    const float = Math.sin(frame * 0.14) * 4;
+    fillPix(ctx, -8, -8 + float, 16, 20, "#c8d8e8");
+    fillPix(ctx, -6, -16 + float, 12, 10, "#e8f0ff");
+    fillPix(ctx, -3, -12 + float, 6, 6, "#6080a0");
+    fillPix(ctx, -12, 0 + float, 4, 14, "#a0b0c8");
+    fillPix(ctx, 8, 0 + float, 4, 14, "#a0b0c8");
+    fillPix(ctx, -2, 4 + float, 4, 8, "#8090a8");
+  }
+
+  function drawCrystalShard(ctx, frame) {
+    const pulse = frame % 14 < 7;
+    fillPix(ctx, -4, 6, 8, 10, "#483898");
+    fillPix(ctx, -10, -8, 10, 14, pulse ? "#d0c0ff" : "#a090e8");
+    fillPix(ctx, 2, -12, 8, 16, pulse ? "#e8e0ff" : "#b8a8f0");
+    fillPix(ctx, 8, -4, 8, 12, pulse ? "#c0b0ff" : "#9080d8");
+    fillPix(ctx, -14, -2, 6, 10, "#7060c8");
+    fillPix(ctx, -3, -6, 6, 6, "#ffffff");
+  }
+
+  function drawMonsterBody(ctx, typeIndex, frame, themeId) {
+    const kind = MONSTER_KINDS[typeIndex] || "gargoyle";
     if (kind === "slime") drawSlime(ctx, frame);
     else if (kind === "goblin") drawGoblin(ctx, frame);
     else if (kind === "wolf") drawWolf(ctx, frame);
@@ -485,32 +1237,25 @@
     else if (kind === "skeleton") drawSkeleton(ctx, frame);
     else if (kind === "spider") drawSpider(ctx, frame);
     else if (kind === "orc") drawOrc(ctx, frame);
+    else if (kind === "meadow_fairy") drawMeadowFairy(ctx, frame);
+    else if (kind === "snow_yeti") drawSnowYeti(ctx, frame);
+    else if (kind === "lava_imp") drawLavaImp(ctx, frame);
+    else if (kind === "ruin_wraith") drawRuinWraith(ctx, frame);
+    else if (kind === "crystal_shard") drawCrystalShard(ctx, frame);
     else drawGargoyle(ctx, frame);
   }
 
-  function drawMapPickup(ctx, tx, ty, pickup, frame, catalog) {
-    const cx = tx * TILE + TILE / 2;
-    const cy = ty * TILE + TILE / 2;
-    const bob = Math.sin(frame * 0.18 + (pickup.id || 0)) * 3;
-    const meta = catalog?.[pickup.itemName] || { color: "#e8c040", icon: "?" };
-    ctx.save();
-    ctx.translate(cx, cy + bob);
-    ctx.fillStyle = "rgba(255, 220, 120, 0.35)";
-    ctx.beginPath();
-    ctx.ellipse(0, 2, 14, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
-    fillPix(ctx, -9, -4, 18, 11, "#7a5028");
-    fillPix(ctx, -9, -7, 18, 4, "#a07038");
-    fillPix(ctx, -7, -5, 14, 2, "#c09050");
-    fillPix(ctx, -4, -2, 8, 5, meta.color || "#6a88e8");
-    ctx.fillStyle = "#fff8e0";
-    ctx.font = "bold 11px system-ui,sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(meta.icon || "?", 0, 2);
-    ctx.restore();
+  function monsterHpColor(m, theme) {
+    if (m.isBoss) return "#ffd050";
+    const id = m.themeId || theme?.id;
+    if (id === "snow") return "#88c8f0";
+    if (id === "volcano") return "#ff7040";
+    if (id === "ruins") return "#c0c0d0";
+    if (id === "crystal") return "#c0a0ff";
+    return "#e85040";
   }
 
-  function drawMonsterSprite(ctx, tx, ty, m, frame, monsterAttackFx) {
+  function drawMonsterSprite(ctx, tx, ty, m, frame, monsterAttackFx, mapTheme) {
     const cx = tx * TILE + TILE / 2;
     const cy = ty * TILE + TILE / 2;
     const boss = !!(m.isBoss);
@@ -540,12 +1285,13 @@
     }
     drawEntityShadow(ctx, 0, 0, boss ? 20 : 12, boss ? 7 : 4);
     if (boss) drawBossBody(ctx, m.bossVariant ?? 0, frame + m.id * 2);
-    else drawMonsterBody(ctx, m.typeIndex, frame + m.id);
-    const w = boss ? 34 : 22;
-    const barY = boss ? -38 : -22;
+    else drawMonsterBody(ctx, m.typeIndex, frame + m.id, m.themeId || mapTheme?.id);
+    const w = boss ? 34 : m.typeIndex >= 8 ? 26 : 22;
+    const barY = boss ? -38 : m.typeIndex >= 8 ? -24 : -22;
     const hpPct = m.maxHp > 0 ? Math.max(0, m.hp / m.maxHp) : 0;
+    const hpCol = monsterHpColor(m, mapTheme);
     fillPix(ctx, -w / 2, barY, w, 5, "#1a1010");
-    fillPix(ctx, -w / 2, barY, w * hpPct, 5, boss ? "#ffd050" : "#e85040");
+    fillPix(ctx, -w / 2, barY, w * hpPct, 5, hpCol);
     if (boss) {
       fillPix(ctx, -w / 2, barY - 6, w, 4, "#4a2808");
       fillPix(ctx, -w / 2 + 2, barY - 5, Math.max(4, w - 4), 2, "#ffcc66");
@@ -644,19 +1390,20 @@
   }
 
   /* —— HD-2D post-process on full map —— */
-  function applyHd2dLighting(ctx, w, h, mapX, mapY) {
+  function applyHd2dLighting(ctx, w, h, mapX, mapY, theme) {
+    const t = theme || MAP_THEMES[0];
     const sunX = mapX * TILE + TILE / 2;
     const sunY = mapY * TILE + TILE / 2;
     const light = ctx.createRadialGradient(sunX, sunY, 30, sunX, sunY, Math.max(w, h) * 0.75);
-    light.addColorStop(0, "rgba(255, 230, 180, 0.18)");
+    light.addColorStop(0, t.light);
     light.addColorStop(0.5, "rgba(80, 120, 160, 0.04)");
-    light.addColorStop(1, "rgba(0, 0, 0, 0.22)");
+    light.addColorStop(1, t.vignette);
     ctx.fillStyle = light;
     ctx.fillRect(0, 0, w, h);
 
     const vig = ctx.createRadialGradient(w / 2, h / 2, h * 0.35, w / 2, h / 2, h * 0.9);
     vig.addColorStop(0, "rgba(0,0,0,0)");
-    vig.addColorStop(1, "rgba(0,0,0,0.2)");
+    vig.addColorStop(1, t.vignette);
     ctx.fillStyle = vig;
     ctx.fillRect(0, 0, w, h);
   }
@@ -669,7 +1416,14 @@
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
         const k = tiles[y][x];
-        ctx.fillStyle = k === 2 ? "#6a6258" : k === 1 ? "#2d5a3a" : "#4a8a52";
+        let col = "#4a8a52";
+        if (k === T.WALL) col = "#6a6258";
+        else if (k === T.WATER) col = "#2878b8";
+        else if (k === T.VILLAGE) col = "#c8a868";
+        else if (k === T.BUILDING) col = "#8a6848";
+        else if (k === T.BRIDGE) col = "#8a7858";
+        else if (k === T.PROP) col = "#2d5a3a";
+        ctx.fillStyle = col;
         ctx.fillRect(x * scale, y * scale, Math.ceil(scale), Math.ceil(scale));
       }
     }
@@ -753,8 +1507,7 @@
     heroJobId,
     combatFx,
     monsterAttackFx,
-    pickups,
-    itemCatalog
+    mapTheme
   ) {
     if (!canvas || !prepareCanvas(canvas)) return;
     const ctx = canvas.getContext("2d");
@@ -762,8 +1515,12 @@
     ctx.imageSmoothingEnabled = false;
     const w = canvas.width;
     const h = canvas.height;
+    const theme =
+      mapTheme ||
+      (typeof mapTheme === "number" ? getThemeForStage(mapTheme) : null) ||
+      MAP_THEMES[0];
 
-    ctx.fillStyle = "#1a2838";
+    ctx.fillStyle = theme.bg || "#1a2838";
     ctx.fillRect(0, 0, w, h);
 
     if (!tilesValid(tiles)) {
@@ -780,32 +1537,29 @@
 
     for (let ty = 0; ty < ROWS; ty++) {
       for (let tx = 0; tx < COLS; tx++) {
-        drawTileWorld(ctx, tx, ty, tiles[ty][tx]);
+        drawTileWorld(ctx, tx, ty, tiles[ty][tx], theme, animFrame);
       }
     }
-
-    for (const pk of pickups || []) {
-      drawMapPickup(ctx, pk.x, pk.y, pk, animFrame, itemCatalog);
-    }
+    drawMapScenery(ctx, tiles, animFrame, theme);
 
     const sorted = [...(monsters || [])].sort((a, b) => a.y - b.y || a.x - b.x);
     for (const m of sorted) {
       if (m.y === my && m.x === mx) continue;
-      drawMonsterSprite(ctx, m.x, m.y, m, animFrame, monsterAttackFx);
+      drawMonsterSprite(ctx, m.x, m.y, m, animFrame, monsterAttackFx, theme);
     }
 
     drawHeroSprite(ctx, mx, my, animFrame, facing || "down", heroJobId);
 
     for (const m of monsters || []) {
       if (m.x === mx && m.y === my) {
-        drawMonsterSprite(ctx, m.x, m.y, m, animFrame, monsterAttackFx);
+        drawMonsterSprite(ctx, m.x, m.y, m, animFrame, monsterAttackFx, theme);
       }
     }
 
     if (combatFx) drawCombatFx(ctx, combatFx, animFrame);
     if (monsterAttackFx) drawMonsterAttackFx(ctx, monsterAttackFx, animFrame);
 
-    applyHd2dLighting(ctx, w, h, mx, my);
+    applyHd2dLighting(ctx, w, h, mx, my, theme);
 
     ctx.strokeStyle = "rgba(255, 220, 140, 0.5)";
     ctx.lineWidth = 2;
@@ -821,6 +1575,12 @@
     JOBS,
     MONSTER_KINDS,
     buildFixedMap,
+    buildStageMap,
+    getThemeForStage,
+    MAP_THEMES,
+    MAX_MAP_STAGES,
+    STAGE_MONSTER_POOLS,
+    MONSTER_KINDS,
     getMapCenter,
     MAP_CENTER,
     isWalkable,

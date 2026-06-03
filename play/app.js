@@ -51,7 +51,6 @@ function classifyFx(msg) {
   if (m.includes("傷害") || m.includes("暴擊") || m.includes("重劈") || m.includes("火球") || m.includes("聖擊") || m.includes("暗襲")) return { icon: "💥", cls: "fx-hit" };
   if (m.includes("沒有目標") || m.includes("無法") || m.includes("魔力不足")) return { icon: "🚫", cls: "fx-warn" };
   if (m.includes("升級")) return { icon: "⬆️", cls: "fx-lvl" };
-  if (m.includes("獲得")) return { icon: "🎁", cls: "fx-win" };
   if (m.includes("反擊")) return { icon: "💢", cls: "fx-hit" };
   if (m.includes("首領出現") || m.includes("關：") || m.includes("盾牆") || m.includes("治療術")) return { icon: "👹", cls: "fx-win" };
   if (m.includes("火球") || m.includes("冰霜") || m.includes("飛刀")) return { icon: "🔥", cls: "fx-hit" };
@@ -91,10 +90,14 @@ function heroStatsHtml(p, view) {
     view?.attack_range_type === "ranged"
       ? `遠程 ${view.attack_range || 3} 格`
       : "近戰";
+  const maxS = view?.max_stages || 5;
+  const themeName = view?.map_theme_name ? `【${view.map_theme_name}】` : "";
   const stageLine = view
-    ? view.boss_active
-      ? `第 ${view.stage} 關 · 首領戰`
-      : `第 ${view.stage} 關 · 剩 ${view.normals_left ?? "?"} 隻`
+    ? view.all_stages_clear
+      ? `全 ${maxS} 關通關！`
+      : view.boss_active
+        ? `第 ${view.stage}/${maxS} 關${themeName} · 首領戰`
+        : `第 ${view.stage}/${maxS} 關${themeName} · 剩 ${view.normals_left ?? "?"} 隻`
     : "";
   return `
     <p class="hero-class-tag">${jobLabel(p.job_id)}</p>
@@ -200,12 +203,58 @@ function renderParty(view) {
 function renderMapHint(view) {
   const el = $("map-hint");
   if (!el || !view) return;
-  const phase = view.boss_active ? "首領戰" : `小怪 ${view.normals_left ?? 0} 隻`;
-  el.textContent = `第 ${view.stage} 關 · ${phase} · 踩道具箱拾取 · WASD 移動 · 空白鍵普攻 · 1/2 技能`;
+  const theme = view.map_theme_name ? `【${view.map_theme_name}】` : "";
+  const maxS = view.max_stages || 5;
+  if (view.all_stages_clear) {
+    el.textContent = `全 ${maxS} 關通關！按重新開始再玩一次`;
+    return;
+  }
+  const phase = view.boss_active ? "首領戰" : `小怪 ${view.normals_left ?? 0}/8`;
+  el.textContent = `第 ${view.stage}/${maxS} 關${theme} · ${phase} · WASD · 空白鍵攻擊 · 1/2 技能`;
 }
 
 function itemMeta(name) {
   return window.ItemCatalog?.[name] || { label: name, desc: "", color: "#5a7a9a", icon: "?" };
+}
+
+function questKindLabel(kind) {
+  if (kind === 1) return "通關";
+  if (kind === 2) return "首領";
+  if (kind === 3) return "成長";
+  if (kind === 4) return "技能";
+  return "討伐";
+}
+
+function renderQuestCompact(q) {
+  const pc = pct(q.progress, q.target);
+  const done = q.done ? "done" : "";
+  const locked = q.locked ? "locked" : "";
+  const ico = q.done ? "✓" : q.locked ? "🔒" : "○";
+  const meta = q.done ? "完成" : q.locked ? "未解鎖" : `${q.progress}/${q.target}`;
+  return `<div class="quest-compact ${done} ${locked}" title="${q.desc || q.title || ""}">
+    <span class="qc-ico">${ico}</span>
+    <span class="qc-title">${q.title || "任務"}</span>
+    <span class="qc-meta">${meta}</span>
+  </div>`;
+}
+
+function renderQuestActive(q) {
+  const pc = pct(q.progress, q.target);
+  const kindTag = questKindLabel(q.kind);
+  return `<div class="quest-sigil active">
+    <div class="quest-shine" style="width:${pc}%"></div>
+    <div class="quest-body">
+      <span class="q-kind">${kindTag}</span>
+      <span class="q-badge">進行中</span>
+      <span class="q-title">${q.title || "任務"}</span>
+      <p class="q-desc">${q.desc || ""}</p>
+      <p class="q-reward">獎勵：${q.reward_text || "—"}</p>
+      <div class="q-progress-row">
+        <div class="q-bar"><div class="q-bar-fill" style="width:${pc}%"></div></div>
+        <span class="q-count">${q.progress} / ${q.target}</span>
+      </div>
+    </div>
+  </div>`;
 }
 
 function renderQuests(view) {
@@ -218,28 +267,14 @@ function renderQuests(view) {
     el.innerHTML = `<p class="quest-empty">目前沒有進行中的任務。</p>`;
     return;
   }
-  el.innerHTML = view.quests
-    .map((q) => {
-      const pc = pct(q.progress, q.target);
-      const done = q.done ? "done" : "";
-      const active = q.active ? "active" : "";
-      const locked = q.locked ? "locked" : "";
-      const status = q.active ? "進行中" : q.locked ? "未解鎖" : done ? "可領取" : "等待中";
-      return `<div class="quest-sigil ${done} ${active} ${locked}">
-        <div class="quest-shine" style="width:${pc}%"></div>
-        <div class="quest-body">
-          <span class="q-badge">${status}</span>
-          <span class="q-title">${q.title || "任務"}</span>
-          <p class="q-desc">${q.desc || ""}</p>
-          <p class="q-reward">獎勵：${q.reward_text || "—"}</p>
-          <div class="q-progress-row">
-            <div class="q-bar"><div class="q-bar-fill" style="width:${pc}%"></div></div>
-            <span class="q-count">${q.progress} / ${q.target}</span>
-          </div>
-        </div>
-      </div>`;
-    })
-    .join("");
+  const doneCount = view.quests.filter((q) => q.done).length;
+  const header = `<p class="quest-summary">任務 ${doneCount} / ${view.quests.length} 完成 · 僅展開進行中</p>`;
+  const activeQ = view.quests.find((q) => q.active && !q.done);
+  const parts = [];
+  if (activeQ) parts.push(renderQuestActive(activeQ));
+  const others = view.quests.filter((q) => q !== activeQ);
+  if (others.length) parts.push(others.map(renderQuestCompact).join(""));
+  el.innerHTML = header + parts.join("");
 }
 
 function renderBag(view) {
@@ -304,13 +339,10 @@ function tilesOk(tiles) {
 }
 
 function rebuildWorld() {
-  if (!game || !WorldView?.buildFixedMap) return;
-  const seed = game.rngSeed >>> 0 || 1;
-  game.worldTiles = WorldView.buildFixedMap(seed);
+  if (!game || !RPG?.applyMapForStage) return;
+  RPG.applyMapForStage(game);
   game.mapMonsters = [];
-  game.mapPickups = [];
   game.nextMonsterId = 1;
-  game.nextPickupId = 1;
   game.mapX = 1;
   game.mapY = 1;
   game.inBattle = 0;
@@ -352,8 +384,7 @@ function renderWorldView(view) {
       heroJobId(view),
       game.combatFx,
       game.monsterAttackFx,
-      game.mapPickups,
-      window.ItemCatalog
+      game.mapTheme
     );
   } catch (err) {
     console.error("Map render error:", err);
@@ -370,8 +401,7 @@ function renderWorldView(view) {
         heroJobId(view),
         game.combatFx,
         game.monsterAttackFx,
-        game.mapPickups,
-        window.ItemCatalog
+        game.mapTheme
       );
     } catch (e2) {
       const ctx = c.getContext("2d");
@@ -455,10 +485,9 @@ function moveHero(dx, dy) {
   game.mapX = nx;
   game.mapY = ny;
   game.facing = facing;
-  const collected = RPG.tryCollectPickup(game);
-  if (!collected) game.message = "";
+  game.message = "";
   saveState(game);
-  renderView(RPG.toView(game), collected ? game.message : null);
+  renderView(RPG.toView(game));
 }
 
 function goToHome() {

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>RPG 冒險</title>
-  <link rel="stylesheet" href="./style.css" />
+  <link rel="stylesheet" href="./style.css?v=20" />
 </head>
 <body>
   <div class="bg-orbs" aria-hidden="true"></div>
@@ -66,28 +66,32 @@
 
       <div class="layout">
         <aside class="rail" id="rail-story">
-          <div id="panel-quests" class="rail-panel">
-            <h2 class="rail-title">故事</h2>
-            <p class="story-chapter" id="story-title">—</p>
-            <p class="story-intro" id="story-intro">—</p>
-            <p class="quest-complete-banner hidden" id="quest-complete-banner">所有故事任務已完成！</p>
-            <h3 class="rail-sub">任務日誌</h3>
-            <div id="quest-list" class="quest-list"></div>
+          <div class="rail-scroll">
+            <div id="panel-quests" class="rail-panel">
+              <h2 class="rail-title">故事</h2>
+              <p class="story-chapter" id="story-title">—</p>
+              <p class="story-intro story-clamp" id="story-intro">—</p>
+              <p class="quest-complete-banner hidden" id="quest-complete-banner">所有故事任務已完成！</p>
+              <h3 class="rail-sub">任務日誌</h3>
+              <div id="quest-list" class="quest-list"></div>
+            </div>
+            <div id="panel-bag" class="rail-panel hidden">
+              <h2 class="rail-title">背包</h2>
+              <p class="bag-hint">點擊道具即可在地圖上使用。</p>
+              <div id="bag-list" class="bag-list"></div>
+              <p class="bag-empty hidden" id="bag-empty">背包是空的</p>
+            </div>
           </div>
-          <div id="panel-bag" class="rail-panel hidden">
-            <h2 class="rail-title">背包</h2>
-            <p class="bag-hint">點擊道具即可在地圖上使用。</p>
-            <div id="bag-list" class="bag-list"></div>
-            <p class="bag-empty hidden" id="bag-empty">背包是空的</p>
+          <div class="rail-footer">
+            <h2 class="rail-title rail-hero-head">英雄</h2>
+            <div id="party-list" class="party-list"></div>
           </div>
-          <h2 class="rail-title rail-hero-head">英雄</h2>
-          <div id="party-list" class="party-list"></div>
         </aside>
 
         <div class="stage-wrap">
           <div id="scene-explore" class="stage stage-explore">
             <div class="map-frame hd2d-frame">
-              <canvas id="world-canvas" class="world-canvas" width="480" height="320" aria-label="遊戲地圖"></canvas>
+              <canvas id="world-canvas" class="world-canvas" width="960" height="640" aria-label="遊戲地圖"></canvas>
             </div>
             <p class="map-hint" id="map-hint">WASD / 方向鍵移動 · 空白鍵攻擊 · B 背包 · Q 任務</p>
           </div>
@@ -98,10 +102,10 @@
 
   <div id="fx-layer" class="fx-layer" aria-hidden="true"></div>
 
-  <script src="./stories.js?v=9"></script>
+  <script src="./stories.js?v=15"></script>
   <script src="./items.js?v=10"></script>
-  <script src="./engine.js?v=11"></script>
-  <script src="./world.js?v=11"></script>
-  <script src="./app.js?v=11"></script>
+  <script src="./engine.js?v=19"></script>
+  <script src="./world.js?v=20"></script>
+  <script src="./app.js?v=18"></script>
 </body>
 </html>

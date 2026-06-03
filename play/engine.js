@@ -21,15 +21,38 @@
     { name: "骷髏兵", hp: 34, atk: 10, def: 3, exp: 26 },
     { name: "毒蜘蛛", hp: 28, atk: 9, def: 2, exp: 22 },
     { name: "獸人", hp: 50, atk: 13, def: 4, exp: 44 },
+    { name: "花蔓妖", hp: 24, atk: 6, def: 1, exp: 14 },
+    { name: "霜雪人", hp: 38, atk: 10, def: 3, exp: 28 },
+    { name: "火焰小鬼", hp: 32, atk: 11, def: 2, exp: 24 },
+    { name: "古代幽靈", hp: 36, atk: 12, def: 2, exp: 30 },
+    { name: "水晶碎靈", hp: 42, atk: 13, def: 4, exp: 38 },
   ];
-  const MAP_ITEM_POOL = [
-    { name: "藥草", weight: 38, heal: 12, mp: 0 },
-    { name: "治療藥水", weight: 22, heal: 35, mp: 0 },
-    { name: "魔力藥水", weight: 20, heal: 0, mp: 30 },
-    { name: "乙醚", weight: 12, heal: 0, mp: 25 },
-    { name: "強效藥水", weight: 8, heal: 60, mp: 0 },
-  ];
-  const BOSS_NAMES = ["荒野魔王", "高塔守護者", "聖壇邪靈", "寶庫幽影", "深淵領主"];
+
+  function pickStageMonster(g) {
+    const stage = Math.min(MAX_STAGES, Math.max(1, g.stage || 1));
+    const pools = global.STAGE_MONSTER_POOLS || [];
+    const pool = pools[stage - 1];
+    if (!pool?.entries?.length) {
+      const idx = randRange(g, 0, 7);
+      const t = MONSTERS[idx];
+      return { typeIndex: idx, name: t.name, hp: t.hp, atk: t.atk, def: t.def, exp: t.exp, themeId: pool?.theme || "" };
+    }
+    const i = randRange(g, 0, pool.entries.length - 1);
+    const e = pool.entries[i];
+    const base = MONSTERS[e.typeIndex] || MONSTERS[0];
+    return {
+      typeIndex: e.typeIndex,
+      name: e.name || base.name,
+      hp: base.hp,
+      atk: base.atk,
+      def: base.def,
+      exp: base.exp,
+      themeId: pool.theme,
+    };
+  }
+  const MAX_STAGES = 5;
+  const BOSS_NAMES = ["草原巨獸", "雪原霸主", "熔岩領主", "遺跡守護者", "水晶龍王"];
+  const STAGE_MONSTER_COUNT = 8;
 
   function randU32(g) {
     g.rngSeed = (Math.imul(g.rngSeed >>> 0, 1103515245) + 12345) >>> 0;
@@ -139,6 +162,35 @@
     if (n.progress > n.target) n.progress = n.target;
   }
 
+  function questAdvanceBoss(g, amount) {
+    if (amount <= 0) return;
+    const n = g.quests.front;
+    if (!n || n.kind !== 2) return;
+    n.progress += amount;
+    if (n.progress > n.target) n.progress = n.target;
+  }
+
+  function questAdvanceLevel(g) {
+    const n = g.quests.front;
+    if (!n || n.kind !== 3) return;
+    const p = g.players[g.activePlayer];
+    if (!p) return;
+    n.progress = p.level;
+    if (n.progress > n.target) n.progress = n.target;
+  }
+
+  function questAdvanceSkillUse(g, amount) {
+    if (amount <= 0) return;
+    const n = g.quests.front;
+    if (!n || n.kind !== 4) return;
+    n.progress += amount;
+    if (n.progress > n.target) n.progress = n.target;
+  }
+
+  function syncQuestProgress(g) {
+    questAdvanceLevel(g);
+  }
+
   function getJobCombat(jobId) {
     const c = global.JobCombat || {};
     return c[jobId] || c.warrior || { basic: { name: "攻擊", range: 1, rangeType: "melee", mpCost: 0, mult: 1 }, skills: [] };
@@ -233,65 +285,6 @@
     else g.monsterAttackFx = null;
   }
 
-  function pickupAt(g, x, y) {
-    return (g.mapPickups || []).find((p) => p.x === x && p.y === y) || null;
-  }
-
-  function pickMapItem(g) {
-    let total = 0;
-    for (const it of MAP_ITEM_POOL) total += it.weight;
-    let r = randRange(g, 1, total);
-    for (const it of MAP_ITEM_POOL) {
-      r -= it.weight;
-      if (r <= 0) return it;
-    }
-    return MAP_ITEM_POOL[0];
-  }
-
-  function removePickupById(g, id) {
-    g.mapPickups = (g.mapPickups || []).filter((p) => p.id !== id);
-  }
-
-  function tryCollectPickup(g) {
-    const p = g.players[g.activePlayer];
-    if (!p) return false;
-    const here = (g.mapPickups || []).filter((pk) => pk.x === g.mapX && pk.y === g.mapY);
-    if (!here.length) return false;
-    const labels = [];
-    for (const pk of here) {
-      invAdd(p, pk.itemName, 1, pk.heal || 0, pk.mp || 0);
-      const label = global.ItemCatalog?.[pk.itemName]?.label || pk.itemName;
-      labels.push(label);
-      removePickupById(g, pk.id);
-    }
-    const line = `獲得 ${labels.join("、")}`;
-    g.message = g.message ? `${line} · ${g.message}` : line;
-    return true;
-  }
-
-  function spawnStagePickups(g) {
-    g.mapPickups = [];
-    if (!g.nextPickupId) g.nextPickupId = 1;
-    const count = randRange(g, 3, 5);
-    const spots = collectSpawnSpots(g, false);
-    let placed = 0;
-    for (let i = 0; i < spots.length && placed < count; i++) {
-      const { x, y } = spots[i];
-      if (pickupAt(g, x, y) || monsterAt(g, x, y)) continue;
-      const it = pickMapItem(g);
-      g.mapPickups.push({
-        id: g.nextPickupId++,
-        x,
-        y,
-        itemName: it.name,
-        heal: it.heal,
-        mp: it.mp,
-      });
-      placed++;
-    }
-    return placed;
-  }
-
   function countNormals(g) {
     return (g.mapMonsters || []).filter((m) => !m.isBoss).length;
   }
@@ -322,6 +315,8 @@
       p.atk += 2;
       p.def += 1;
       g.message = `升級！Lv${p.level}`;
+      syncQuestProgress(g);
+      questTryCompleteFront(g);
     }
   }
 
@@ -437,11 +432,10 @@
     const ROWS = WorldView?.ROWS || 10;
     for (let y = 1; y < ROWS - 1; y++) {
       for (let x = 1; x < COLS - 1; x++) {
-        if (tiles[y][x] === 2) continue;
+        if (!WorldView?.isWalkable?.(tiles, x, y)) continue;
         if (!forBoss && isBossArenaTile(x, y)) continue;
         if (x === g.mapX && y === g.mapY) continue;
         if (monsterAt(g, x, y)) continue;
-        if (pickupAt(g, x, y)) continue;
         if (!forBoss && Math.abs(x - g.mapX) + Math.abs(y - g.mapY) < 2) continue;
         spots.push({ x, y });
       }
@@ -461,24 +455,27 @@
     const COLS = WorldView?.COLS || 15;
     const ROWS = WorldView?.ROWS || 10;
     if (x < 1 || y < 1 || x >= COLS - 1 || y >= ROWS - 1) return false;
-    if (tiles[y][x] === 2) return false;
+    if (!WorldView?.isWalkable?.(tiles, x, y)) return false;
     if (x === g.mapX && y === g.mapY) return false;
     if (monsterAt(g, x, y)) return false;
-    if (pickupAt(g, x, y)) return false;
     const stage = g.stage || 1;
     if (!g.nextMonsterId) g.nextMonsterId = 1;
     if (isBoss) {
-      const idx = 3;
-      const t = MONSTERS[idx];
+      const si = Math.min(MAX_STAGES, Math.max(1, stage)) - 1;
+      const bossTypes = [2, 9, 10, 11, 12];
+      const idx = bossTypes[si] || 3;
+      const t = MONSTERS[idx] || MONSTERS[3];
       let mh = 70 + stage * 28 + randRange(g, -5, 12);
       if (mh < 40) mh = 40;
-      const bname = BOSS_NAMES[(stage - 1) % BOSS_NAMES.length];
-      const bossVariant = (stage - 1) % BOSS_NAMES.length;
+      const bname = BOSS_NAMES[si];
+      const bossVariant = si;
+      const theme = g.mapTheme?.id || global.STAGE_MONSTER_POOLS?.[si]?.theme || "";
       g.mapMonsters.push({
         id: g.nextMonsterId++,
         x,
         y,
         typeIndex: idx,
+        themeId: theme,
         name: `首領·${bname}`,
         hp: mh,
         maxHp: mh,
@@ -490,30 +487,48 @@
       });
       return true;
     }
-    const idx = randRange(g, 0, MONSTERS.length - 1);
-    const t = MONSTERS[idx];
-    let mh = t.hp + randRange(g, -3, 4) + Math.floor(stage * 0.5);
+    const picked = pickStageMonster(g);
+    let mh = picked.hp + randRange(g, -3, 4) + Math.floor(stage * 0.5);
     if (mh < 8) mh = 8;
     g.mapMonsters.push({
       id: g.nextMonsterId++,
       x,
       y,
-      typeIndex: idx,
-      name: t.name,
+      typeIndex: picked.typeIndex,
+      themeId: picked.themeId,
+      name: picked.name,
       hp: mh,
       maxHp: mh,
-      atk: t.atk + Math.floor(stage / 3),
-      def: t.def,
-      exp: t.exp + stage * 2,
+      atk: picked.atk + Math.floor(stage / 3),
+      def: picked.def,
+      exp: picked.exp + stage * 2,
       isBoss: 0,
     });
     return true;
   }
 
+  function applyMapForStage(g) {
+    const stage = Math.min(MAX_STAGES, Math.max(1, g.stage || 1));
+    g.stage = stage;
+    const seed = (g.rngSeed + stage * 9973) >>> 0;
+    if (typeof WorldView !== "undefined" && WorldView.buildStageMap) {
+      const built = WorldView.buildStageMap(seed, stage);
+      g.worldTiles = built.tiles;
+      g.mapTheme = built.theme;
+    } else if (typeof WorldView !== "undefined" && WorldView.buildFixedMap) {
+      g.worldTiles = WorldView.buildFixedMap(seed, stage);
+    } else {
+      g.worldTiles = [];
+      g.mapTheme = null;
+    }
+    g.mapX = 1;
+    g.mapY = 1;
+  }
+
   function spawnStageNormals(g) {
     g.mapMonsters = [];
     g.stagePhase = "normal";
-    const count = randRange(g, 4, 6);
+    const count = STAGE_MONSTER_COUNT;
     g.stageQuota = count;
     const spots = collectSpawnSpots(g);
     let placed = 0;
@@ -527,15 +542,19 @@
         }
       }
     }
-    const items = spawnStagePickups(g);
-    g.message = `第 ${g.stage || 1} 關：${placed} 隻魔物、${items} 個地圖道具（踩上去拾取）`;
+    const themeName = g.mapTheme?.name || "未知";
+    const pool = global.STAGE_MONSTER_POOLS?.[(g.stage || 1) - 1];
+    const mobHint = pool?.entries?.length ? pool.entries.map((e) => e.name).filter((n, i, a) => a.indexOf(n) === i).slice(0, 3).join("、") : "";
+    g.message = `第 ${g.stage || 1} 關【${themeName}】：${placed} 隻魔物${mobHint ? `（${mobHint}…）` : ""}`;
   }
 
   function spawnBoss(g) {
     if (countBosses(g) > 0) return;
     const center = WorldView?.getMapCenter?.() || { x: 7, y: 5 };
     const tiles = g.worldTiles;
-    if (tiles?.length && tiles[center.y][center.x] === 2) tiles[center.y][center.x] = 0;
+    if (tiles?.length && !WorldView?.isWalkable?.(tiles, center.x, center.y)) {
+      tiles[center.y][center.x] = 0;
+    }
 
     const tryOrder = [
       [0, 0],
@@ -564,13 +583,26 @@
     g.message = placed ? `第 ${g.stage || 1} 關首領現身於地圖中央！` : `第 ${g.stage || 1} 關首領出現！`;
   }
 
+  function completeAllStages(g) {
+    g.allStagesClear = 1;
+    g.stagePhase = "clear";
+    g.mapMonsters = [];
+    g.message = `恭喜通關！完成全部 ${MAX_STAGES} 關冒險！`;
+  }
+
   function advanceStage(g) {
     const p = g.players[g.activePlayer];
-    g.stage = (g.stage || 1) + 1;
+    const cur = g.stage || 1;
+    if (cur >= MAX_STAGES) {
+      completeAllStages(g);
+      return;
+    }
+    g.stage = cur + 1;
     questAdvanceStage(g, 1);
     questTryCompleteFront(g);
     p.hp = Math.min(p.hp + 18, p.maxHp);
     p.mp = Math.min(p.mp + 12, p.maxMp);
+    applyMapForStage(g);
     spawnStageNormals(g);
   }
 
@@ -710,7 +742,17 @@
       g.message = "無此技能";
       return false;
     }
-    return mapAttackWithDef(g, sk);
+    const ok = mapAttackWithDef(g, sk);
+    if (ok) {
+      g.skillUseCount = (g.skillUseCount || 0) + 1;
+      questAdvanceSkillUse(g, 1);
+      questTryCompleteFront(g);
+    } else if (sk.targetSelf || sk.defBoostTurns) {
+      g.skillUseCount = (g.skillUseCount || 0) + 1;
+      questAdvanceSkillUse(g, 1);
+      questTryCompleteFront(g);
+    }
+    return ok;
   }
 
   function onMonsterKilled(g, m) {
@@ -733,11 +775,23 @@
       p.atk += 2;
       p.def += 1;
       g.message += " 升級！";
+      syncQuestProgress(g);
+      questTryCompleteFront(g);
     }
     removeMapMonsterById(g, m.id);
     g.engagedMonsterId = 0;
     if (m.isBoss) {
+      questAdvanceBoss(g, 1);
+      questAdvanceStage(g, 1);
+      questTryCompleteFront(g);
+      const cur = g.stage || 1;
+      const themeName = g.mapTheme?.name || "";
       g.message += " 首領擊敗！";
+      if (cur >= MAX_STAGES) {
+        g.message = `第 ${cur} 關【${themeName}】通關！${g.message}`;
+        completeAllStages(g);
+        return;
+      }
       advanceStage(g);
       return;
     }
@@ -756,20 +810,11 @@
   }
 
   function initWorld(g) {
-    const seed = g.rngSeed >>> 0 || 1;
-    if (typeof WorldView !== "undefined" && WorldView.buildFixedMap) {
-      g.worldTiles = WorldView.buildFixedMap(seed);
-    } else {
-      g.worldTiles = [];
-    }
+    if (!g.stage) g.stage = 1;
+    applyMapForStage(g);
     g.mapMonsters = [];
-    g.mapPickups = [];
     g.nextMonsterId = 1;
-    g.nextPickupId = 1;
     g.engagedMonsterId = 0;
-    g.mapX = 1;
-    g.mapY = 1;
-    g.stage = 1;
     g.stagePhase = "normal";
     spawnStageNormals(g);
   }
@@ -827,8 +872,6 @@
       if (!g.stage) g.stage = 1;
       if (!g.stagePhase) g.stagePhase = "normal";
       spawnStageNormals(g);
-    } else if (!g.mapPickups?.length) {
-      spawnStagePickups(g);
     }
   }
 
@@ -877,7 +920,7 @@
         id: id++,
         title: q.title,
         desc: q.desc,
-        kind: 0,
+        kind: q.kind ?? 0,
         target: q.target,
         progress: 0,
         rewardExp: q.rewardExp || 30,
@@ -917,14 +960,14 @@
       message: "",
       gameOver: 0,
       allQuestsDone: 0,
+      allStagesClear: 0,
+      skillUseCount: 0,
       stage: 1,
       stagePhase: "normal",
       stageQuota: 0,
       facing: "down",
       combatFx: null,
       monsterAttackFx: null,
-      mapPickups: [],
-      nextPickupId: 1,
       players: [],
     };
     g.players.push({
@@ -948,6 +991,7 @@
     if (job === "warrior") invAdd(g.players[0], "強效藥水", 1, 60, 0);
     g.playerCount = 1;
     bootstrapQuests(g);
+    syncQuestProgress(g);
     initWorld(g);
     g.message = "冒險開始";
     return g;
@@ -998,6 +1042,7 @@
         desc: n.desc,
         progress: n.progress,
         target: n.target,
+        kind: n.kind,
         done,
         active: idx === 0 && !done,
         locked: idx > 0,
@@ -1049,6 +1094,10 @@
       stage: g.stage || 1,
       stage_phase: g.stagePhase || "normal",
       stage_quota: g.stageQuota || 0,
+      map_theme: g.mapTheme?.id || "meadow",
+      map_theme_name: g.mapTheme?.name || "",
+      max_stages: MAX_STAGES,
+      all_stages_clear: !!g.allStagesClear,
       normals_left: countNormals(g),
       boss_active: g.stagePhase === "boss",
       attack_name: getJobAttack(g.heroJobId).name,
@@ -1066,7 +1115,6 @@
       })),
       combat_fx: g.combatFx ? { ...g.combatFx } : null,
       monster_attack_fx: g.monsterAttackFx ? { ...g.monsterAttackFx } : null,
-      map_pickups: (g.mapPickups || []).map((p) => ({ ...p })),
       facing: g.facing || "down",
     };
   }
@@ -1095,16 +1143,17 @@
     }
     return {
       v: 9,
-      mapPickups: g.mapPickups || [],
-      nextPickupId: g.nextPickupId || 1,
       facing: g.facing || "down",
       stage: g.stage || 1,
       stagePhase: g.stagePhase || "normal",
       stageQuota: g.stageQuota || 0,
+      mapTheme: g.mapTheme || null,
       heroJobId: g.heroJobId || g.players[0]?.jobId || "warrior",
       storyTitle: g.storyTitle || "",
       storyIntro: g.storyIntro || "",
       allQuestsDone: g.allQuestsDone ? 1 : 0,
+      allStagesClear: g.allStagesClear ? 1 : 0,
+      skillUseCount: g.skillUseCount || 0,
       rngSeed: g.rngSeed,
       worldTiles: g.worldTiles,
       mapMonsters: g.mapMonsters || [],
@@ -1181,12 +1230,13 @@
       engagedMonsterId: data.engagedMonsterId || 0,
       gameOver: 0,
       allQuestsDone: data.allQuestsDone ? 1 : 0,
+      allStagesClear: data.allStagesClear ? 1 : 0,
+      skillUseCount: data.skillUseCount || 0,
       stage: data.stage || 1,
       stagePhase: data.stagePhase || "normal",
       stageQuota: data.stageQuota || 0,
       facing: data.facing || "down",
-      mapPickups: Array.isArray(data.mapPickups) ? data.mapPickups : [],
-      nextPickupId: data.nextPickupId || 1,
+      mapTheme: data.mapTheme || null,
     };
     const parr = (data.players || []).slice(0, 1);
     for (let i = 0; i < parr.length; i++) {
@@ -1231,9 +1281,7 @@
       g.worldTiles.length !== rows ||
       g.worldTiles[0]?.length !== cols;
     if (tilesBad) {
-      if (typeof WorldView !== "undefined" && WorldView.buildFixedMap) {
-        g.worldTiles = WorldView.buildFixedMap(g.rngSeed);
-      }
+      applyMapForStage(g);
       g.mapMonsters = [];
       g.nextMonsterId = g.nextMonsterId || 1;
       if (g.mapX < 1) g.mapX = 1;
@@ -1260,6 +1308,7 @@
       g.storyIntro = g.storyIntro || story.intro;
       if (g.players[0] && story.name) g.players[0].name = story.name;
     }
+    syncQuestProgress(g);
     return g;
   }
 
@@ -1273,11 +1322,12 @@
     mapStrike,
     mapSkill,
     ensureMapMonsters,
+    applyMapForStage,
+    MAX_STAGES,
     getJobCombat,
     getJobAttack,
     tickCombatFx,
     tickMonsterAttackFx,
-    tryCollectPickup,
     MAX_PLAYERS,
     JOB_STATS,
   };
