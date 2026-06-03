@@ -54,6 +54,32 @@
   const BOSS_NAMES = ["草原巨獸", "雪原霸主", "熔岩領主", "遺跡守護者", "水晶龍王"];
   const STAGE_MONSTER_COUNT = 8;
 
+  /** 各關首領固定掉落（通關獎勵） */
+  const BOSS_LOOT_BY_STAGE = [
+    [
+      { name: "治療藥水", qty: 1 },
+      { name: "藥草", qty: 2 },
+    ],
+    [
+      { name: "強效藥水", qty: 1 },
+      { name: "魔力藥水", qty: 1 },
+    ],
+    [
+      { name: "強效藥水", qty: 2 },
+      { name: "乙醚", qty: 1 },
+    ],
+    [
+      { name: "強效藥水", qty: 1 },
+      { name: "魔力藥水", qty: 2 },
+      { name: "治療藥水", qty: 1 },
+    ],
+    [
+      { name: "強效藥水", qty: 2 },
+      { name: "魔力藥水", qty: 2 },
+      { name: "乙醚", qty: 1 },
+    ],
+  ];
+
   function randU32(g) {
     g.rngSeed = (Math.imul(g.rngSeed >>> 0, 1103515245) + 12345) >>> 0;
     return g.rngSeed;
@@ -283,6 +309,62 @@
   function tickMonsterAttackFx(g) {
     if (g.monsterAttackFx && g.monsterAttackFx.ttl > 0) g.monsterAttackFx.ttl -= 1;
     else g.monsterAttackFx = null;
+  }
+
+  function itemMeta(name) {
+    const cat = global.ItemCatalog || {};
+    const m = cat[name] || {};
+    return {
+      heal: m.heal || 0,
+      mp: m.mp || 0,
+      icon: m.icon || "?",
+      color: m.color || "#c9a227",
+      label: m.label || name,
+    };
+  }
+
+  function grantBossLoot(g, stage) {
+    const si = Math.min(MAX_STAGES, Math.max(1, stage)) - 1;
+    const table = BOSS_LOOT_BY_STAGE[si] || BOSS_LOOT_BY_STAGE[0];
+    const p = g.players[g.activePlayer];
+    const granted = [];
+    for (const row of table) {
+      const meta = itemMeta(row.name);
+      invAdd(p, row.name, row.qty || 1, meta.heal, meta.mp);
+      granted.push({ name: row.name, qty: row.qty || 1, ...meta });
+    }
+    if (randRange(g, 1, 100) <= 40) {
+      invAdd(p, "藥草", 1, 12, 0);
+      granted.push({ name: "藥草", qty: 1, ...itemMeta("藥草") });
+    }
+    return granted;
+  }
+
+  function formatLootMessage(granted) {
+    if (!granted?.length) return "";
+    const parts = granted.map((it) => `${it.label || it.name}×${it.qty}`);
+    return `首領掉落：${parts.join("、")}`;
+  }
+
+  function spawnLootFx(g, x, y, granted) {
+    if (!granted?.length) return;
+    g.lootFx = {
+      x,
+      y,
+      drops: granted.map((it) => ({
+        name: it.name,
+        qty: it.qty,
+        icon: it.icon,
+        color: it.color,
+        label: it.label || it.name,
+      })),
+      ttl: 78,
+    };
+  }
+
+  function tickLootFx(g) {
+    if (g.lootFx && g.lootFx.ttl > 0) g.lootFx.ttl -= 1;
+    else g.lootFx = null;
   }
 
   function countNormals(g) {
@@ -778,21 +860,29 @@
       syncQuestProgress(g);
       questTryCompleteFront(g);
     }
+    const killX = m.x;
+    const killY = m.y;
     removeMapMonsterById(g, m.id);
     g.engagedMonsterId = 0;
     if (m.isBoss) {
+      const cur = g.stage || 1;
+      const loot = grantBossLoot(g, cur);
+      const lootMsg = formatLootMessage(loot);
+      spawnLootFx(g, killX, killY, loot);
       questAdvanceBoss(g, 1);
       questAdvanceStage(g, 1);
       questTryCompleteFront(g);
-      const cur = g.stage || 1;
       const themeName = g.mapTheme?.name || "";
       g.message += " 首領擊敗！";
+      if (lootMsg) g.message += ` ${lootMsg}`;
+      const bossMsg = g.message;
       if (cur >= MAX_STAGES) {
-        g.message = `第 ${cur} 關【${themeName}】通關！${g.message}`;
         completeAllStages(g);
+        g.message = `第 ${cur} 關【${themeName}】通關！${bossMsg} · ${g.message}`;
         return;
       }
       advanceStage(g);
+      g.message = `${bossMsg} · ${g.message}`;
       return;
     }
     if (countNormals(g) === 0 && g.stagePhase !== "boss") {
@@ -968,6 +1058,7 @@
       facing: "down",
       combatFx: null,
       monsterAttackFx: null,
+      lootFx: null,
       players: [],
     };
     g.players.push({
@@ -1115,6 +1206,7 @@
       })),
       combat_fx: g.combatFx ? { ...g.combatFx } : null,
       monster_attack_fx: g.monsterAttackFx ? { ...g.monsterAttackFx } : null,
+      loot_fx: g.lootFx ? { ...g.lootFx, drops: (g.lootFx.drops || []).map((d) => ({ ...d })) } : null,
       facing: g.facing || "down",
     };
   }
@@ -1328,6 +1420,7 @@
     getJobAttack,
     tickCombatFx,
     tickMonsterAttackFx,
+    tickLootFx,
     MAX_PLAYERS,
     JOB_STATS,
   };

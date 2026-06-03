@@ -46,6 +46,7 @@ function classifyFx(msg) {
   if (!msg || !String(msg).trim()) return null;
   const m = String(msg);
   if (m.includes("遊戲結束")) return { icon: "💀", cls: "fx-warn" };
+  if (m.includes("首領掉落")) return { icon: "🎁", cls: "fx-loot" };
   if (m.includes("任務完成") || m.includes("首領擊敗") || m.includes("掉落") || m.includes("擊敗")) return { icon: "✨", cls: "fx-win" };
   if (m.includes("使用道具") || m.includes("自癒")) return { icon: "💚", cls: "fx-heal" };
   if (m.includes("傷害") || m.includes("暴擊") || m.includes("重劈") || m.includes("火球") || m.includes("聖擊") || m.includes("暗襲")) return { icon: "💥", cls: "fx-hit" };
@@ -384,7 +385,8 @@ function renderWorldView(view) {
       heroJobId(view),
       game.combatFx,
       game.monsterAttackFx,
-      game.mapTheme
+      game.mapTheme,
+      game.lootFx
     );
   } catch (err) {
     console.error("Map render error:", err);
@@ -401,7 +403,8 @@ function renderWorldView(view) {
         heroJobId(view),
         game.combatFx,
         game.monsterAttackFx,
-        game.mapTheme
+        game.mapTheme,
+        game.lootFx
       );
     } catch (e2) {
       const ctx = c.getContext("2d");
@@ -441,6 +444,7 @@ function startAnimLoop() {
     if (game && $("game") && !$("game").classList.contains("hidden")) {
       if (game.combatFx && RPG.tickCombatFx) RPG.tickCombatFx(game);
       if (game.monsterAttackFx && RPG.tickMonsterAttackFx) RPG.tickMonsterAttackFx(game);
+      if (game.lootFx && RPG.tickLootFx) RPG.tickLootFx(game);
       const view = RPG.toView(game);
       renderWorldView(view);
       paintHeroPortraits($("party-list"));

@@ -1370,6 +1370,16 @@ body {
 }
 .fx-battle .fx-ico { filter: drop-shadow(0 0 20px rgba(255, 80, 60, 0.8)); }
 .fx-heal .fx-ico { filter: drop-shadow(0 0 16px rgba(80, 255, 160, 0.7)); }
+.fx-loot .fx-ico {
+  font-size: 3rem;
+  filter: drop-shadow(0 0 24px rgba(255, 200, 80, 0.9));
+  animation: lootPop 0.55s ease-out;
+}
+@keyframes lootPop {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
 .shake { animation: shake 0.35s ease; }
 @keyframes shake {
   0%, 100% { transform: translateX(0); }

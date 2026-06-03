@@ -1299,6 +1299,62 @@
     ctx.restore();
   }
 
+  function drawLootFx(ctx, lootFx, animFrame) {
+    if (!lootFx || lootFx.ttl <= 0 || !lootFx.drops?.length) return;
+    const t = 1 - lootFx.ttl / 78;
+    const bob = Math.sin(animFrame * 0.2) * 4;
+    const cx = lootFx.x * TILE + TILE / 2;
+    const baseY = lootFx.y * TILE + TILE / 2 - 8 - t * 28;
+    const spread = Math.min(lootFx.drops.length, 5);
+
+    ctx.save();
+    ctx.globalAlpha = 0.35 + (1 - t) * 0.45;
+    ctx.fillStyle = "#ffd050";
+    ctx.beginPath();
+    ctx.arc(cx, baseY + bob, 22 + t * 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 220, 100, 0.85)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cx, baseY + bob, 14 + (1 - t) * 6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    lootFx.drops.forEach((drop, i) => {
+      const off = (i - (spread - 1) / 2) * 22;
+      const px = cx + off;
+      const py = baseY + bob - 18 - (i % 2) * 6;
+      const rise = (1 - t) * 12;
+      ctx.save();
+      ctx.translate(px, py - rise);
+      ctx.globalAlpha = Math.min(1, lootFx.ttl / 20);
+      fillPix(ctx, -14, -10, 28, 22, "rgba(20,16,8,0.75)");
+      fillPix(ctx, -12, -8, 24, 18, drop.color || "#c9a227");
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 14px system-ui,sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(drop.icon || "?", 0, -2);
+      if (drop.qty > 1) {
+        ctx.font = "bold 10px system-ui,sans-serif";
+        ctx.fillStyle = "#ffe8a0";
+        ctx.fillText(`×${drop.qty}`, 10, 8);
+      }
+      ctx.restore();
+    });
+
+    ctx.save();
+    ctx.fillStyle = "rgba(255, 240, 200, 0.9)";
+    ctx.font = "bold 11px system-ui,sans-serif";
+    ctx.textAlign = "center";
+    ctx.globalAlpha = Math.min(1, lootFx.ttl / 24);
+    ctx.fillText("首領掉落", cx, baseY + bob + 22);
+    ctx.restore();
+  }
+
   function drawCombatFx(ctx, fx, animFrame) {
     if (!fx || fx.ttl <= 0) return;
     const t = fx.ttl / 16;
@@ -1507,7 +1563,8 @@
     heroJobId,
     combatFx,
     monsterAttackFx,
-    mapTheme
+    mapTheme,
+    lootFx
   ) {
     if (!canvas || !prepareCanvas(canvas)) return;
     const ctx = canvas.getContext("2d");
@@ -1558,6 +1615,7 @@
 
     if (combatFx) drawCombatFx(ctx, combatFx, animFrame);
     if (monsterAttackFx) drawMonsterAttackFx(ctx, monsterAttackFx, animFrame);
+    if (lootFx) drawLootFx(ctx, lootFx, animFrame);
 
     applyHd2dLighting(ctx, w, h, mx, my, theme);
 
