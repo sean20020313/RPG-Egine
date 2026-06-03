@@ -54,6 +54,10 @@
   const BOSS_NAMES = ["草原巨獸", "雪原霸主", "熔岩領主", "水晶龍王"];
   const BOSS_TYPE_BY_STAGE = [2, 9, 10, 12];
   const STAGE_MONSTER_COUNT = 8;
+  /** 小怪彼此曼哈頓距離至少幾格（避免擠在一起） */
+  const NORMAL_MONSTER_MIN_DIST = 3;
+  /** 首領與其他魔物至少隔幾格 */
+  const BOSS_MIN_DIST_FROM_OTHERS = 2;
 
   /** 各關首領固定掉落（通關獎勵） */
   const BOSS_LOOT_BY_STAGE = [
@@ -518,15 +522,74 @@
     return Math.abs(x - center.x) <= 1 && Math.abs(y - center.y) <= 1;
   }
 
-  function collectSpawnSpots(g, forBoss) {
+  function monsterOccupiedSet(g) {
+    const s = new Set();
+    for (const m of g.mapMonsters || []) {
+      s.add(`${m.x},${m.y}`);
+    }
+    return s;
+  }
+
+  function monsterMinDistance(g, x, y, excludeId) {
+    let min = 99;
+    for (const m of g.mapMonsters || []) {
+      if (excludeId != null && m.id === excludeId) continue;
+      const d = Math.abs(m.x - x) + Math.abs(m.y - y);
+      if (d < min) min = d;
+    }
+    return min;
+  }
+
+  function monsterSpacingOk(g, x, y, minDist, excludeId) {
+    if (!g.mapMonsters?.length) return true;
+    return monsterMinDistance(g, x, y, excludeId) >= minDist;
+  }
+
+  function blockedForMonsterMelee(g, mx, my) {
+    const blocked = monsterOccupiedSet(g);
+    blocked.add(`${mx},${my}`);
+    return blocked;
+  }
+
+  function canReachMonsterForAttack(g, mx, my) {
+    const tiles = g.worldTiles;
+    if (!tiles?.length || !WorldView?.canPlayerMeleeMonster) return true;
+    return WorldView.canPlayerMeleeMonster(
+      tiles,
+      g.mapX,
+      g.mapY,
+      mx,
+      my,
+      blockedForMonsterMelee(g, mx, my)
+    );
+  }
+
+  /** 假設魔物 m 在 (mx,my) 時，玩家能否近戰到達 */
+  function canReachMonsterIfAt(g, mx, my, m) {
+    const tiles = g.worldTiles;
+    if (!tiles?.length || !WorldView?.canPlayerMeleeMonster) return true;
+    const blocked = new Set();
+    for (const o of g.mapMonsters || []) {
+      if (o.id === m.id) continue;
+      blocked.add(`${o.x},${o.y}`);
+    }
+    blocked.add(`${mx},${my}`);
+    return WorldView.canPlayerMeleeMonster(tiles, g.mapX, g.mapY, mx, my, blocked);
+  }
+
+  function collectSpawnSpots(g, forBoss, minSpacing) {
     const tiles = g.worldTiles;
     const spots = [];
     if (!tiles?.length) return spots;
     const COLS = WorldView?.COLS || 15;
     const ROWS = WorldView?.ROWS || 10;
+    const req =
+      minSpacing ?? (forBoss ? BOSS_MIN_DIST_FROM_OTHERS : NORMAL_MONSTER_MIN_DIST);
     for (let y = 1; y < ROWS - 1; y++) {
       for (let x = 1; x < COLS - 1; x++) {
         if (!WorldView?.isWalkable?.(tiles, x, y)) continue;
+        if (!canReachMonsterForAttack(g, x, y)) continue;
+        if (!monsterSpacingOk(g, x, y, req)) continue;
         if (!forBoss && isBossArenaTile(x, y)) continue;
         if (x === g.mapX && y === g.mapY) continue;
         if (monsterAt(g, x, y)) continue;
@@ -534,16 +597,18 @@
         spots.push({ x, y });
       }
     }
-    for (let i = spots.length - 1; i > 0; i--) {
-      const j = randRange(g, 0, i);
-      const t = spots[i];
-      spots[i] = spots[j];
-      spots[j] = t;
-    }
+    spots.sort((a, b) => {
+      const da = monsterMinDistance(g, a.x, a.y);
+      const db = monsterMinDistance(g, b.x, b.y);
+      if (db !== da) return db - da;
+      const pa = Math.abs(a.x - g.mapX) + Math.abs(a.y - g.mapY);
+      const pb = Math.abs(b.x - g.mapX) + Math.abs(b.y - g.mapY);
+      return pb - pa;
+    });
     return spots;
   }
 
-  function spawnOneAt(g, x, y, isBoss) {
+  function spawnOneAt(g, x, y, isBoss, minSpacing) {
     const tiles = g.worldTiles;
     if (!tiles?.length) return false;
     const COLS = WorldView?.COLS || 15;
@@ -552,6 +617,10 @@
     if (!WorldView?.isWalkable?.(tiles, x, y)) return false;
     if (x === g.mapX && y === g.mapY) return false;
     if (monsterAt(g, x, y)) return false;
+    if (!canReachMonsterForAttack(g, x, y)) return false;
+    const spaceReq =
+      minSpacing ?? (isBoss ? BOSS_MIN_DIST_FROM_OTHERS : NORMAL_MONSTER_MIN_DIST);
+    if (!monsterSpacingOk(g, x, y, spaceReq)) return false;
     const stage = g.stage || 1;
     if (!g.nextMonsterId) g.nextMonsterId = 1;
     const diff = monsterDifficulty(g);
@@ -620,23 +689,140 @@
     g.mapY = 1;
   }
 
+  function findMonsterRelocateSpot(g, m, minSpacing) {
+    const tiles = g.worldTiles;
+    if (!tiles?.length) return null;
+    const COLS = WorldView?.COLS || 15;
+    const ROWS = WorldView?.ROWS || 10;
+    const req = minSpacing ?? (m.isBoss ? BOSS_MIN_DIST_FROM_OTHERS : NORMAL_MONSTER_MIN_DIST);
+    const candidates = [];
+    for (let y = 1; y < ROWS - 1; y++) {
+      for (let x = 1; x < COLS - 1; x++) {
+        if (!WorldView?.isWalkable?.(tiles, x, y)) continue;
+        if (monsterAt(g, x, y)) continue;
+        if (!m.isBoss && isBossArenaTile(x, y)) continue;
+        if (x === g.mapX && y === g.mapY) continue;
+        if (!canReachMonsterIfAt(g, x, y, m)) continue;
+        const sep = monsterMinDistance(g, x, y, m.id);
+        candidates.push({
+          x,
+          y,
+          sep,
+          d: Math.abs(x - g.mapX) + Math.abs(y - g.mapY),
+        });
+      }
+    }
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => {
+      if (b.sep !== a.sep) return b.sep - a.sep;
+      return b.d - a.d;
+    });
+    const best = candidates.find((c) => c.sep >= req);
+    return best || candidates[0];
+  }
+
+  function spreadClusteredMonsters(g) {
+    const levels = [NORMAL_MONSTER_MIN_DIST, 2];
+    for (const req of levels) {
+      for (let pass = 0; pass < 10; pass++) {
+        let moved = false;
+        const normals = (g.mapMonsters || []).filter((m) => !m.isBoss);
+        normals.sort(
+          (a, b) =>
+            monsterMinDistance(g, a.x, a.y, a.id) - monsterMinDistance(g, b.x, b.y, b.id)
+        );
+        for (const m of normals) {
+          if (monsterMinDistance(g, m.x, m.y, m.id) >= req) continue;
+          const spot = findMonsterRelocateSpot(g, m, req);
+          if (!spot) continue;
+          m.x = spot.x;
+          m.y = spot.y;
+          moved = true;
+        }
+        if (!moved) break;
+      }
+    }
+  }
+
+  function fixUnreachableMonsters(g) {
+    for (let attempt = 0; attempt < 48; attempt++) {
+      const bad = (g.mapMonsters || []).filter((m) => !canReachMonsterForAttack(g, m.x, m.y));
+      if (!bad.length) return;
+      let progress = false;
+      for (const m of bad) {
+        const spot = findMonsterRelocateSpot(g, m);
+        if (spot) {
+          m.x = spot.x;
+          m.y = spot.y;
+          progress = true;
+        }
+      }
+      if (progress) continue;
+      const m = bad[0];
+      const wasBoss = !!m.isBoss;
+      removeMapMonsterById(g, m.id);
+      for (const s of collectSpawnSpots(g, wasBoss)) {
+        if (spawnOneAt(g, s.x, s.y, wasBoss)) {
+          progress = true;
+          break;
+        }
+      }
+      if (!progress && WorldView?.openBarrierCell) {
+        const map = g.worldTiles;
+        const dirs = [
+          [0, 1],
+          [0, -1],
+          [1, 0],
+          [-1, 0],
+        ];
+        for (const m of bad) {
+          for (const [dx, dy] of dirs) {
+            const ax = m.x + dx;
+            const ay = m.y + dy;
+            if (!map?.[ay] || map[ay][ax] == null) continue;
+            const k = map[ay][ax];
+            if (k !== 2 && k !== 3 && k !== 5) continue;
+            WorldView.openBarrierCell(map, ax, ay);
+            progress = true;
+            break;
+          }
+          if (progress) break;
+        }
+      }
+      if (!progress) break;
+    }
+  }
+
   function spawnStageNormals(g) {
     g.mapMonsters = [];
     g.stagePhase = "normal";
     const count = STAGE_MONSTER_COUNT;
     g.stageQuota = count;
-    const spots = collectSpawnSpots(g);
     let placed = 0;
-    for (let i = 0; i < spots.length && placed < count; i++) {
-      if (spawnOneAt(g, spots[i].x, spots[i].y, false)) placed++;
+    for (const spacing of [NORMAL_MONSTER_MIN_DIST, 2]) {
+      const spots = collectSpawnSpots(g, false, spacing);
+      for (let i = 0; i < spots.length && placed < count; i++) {
+        if (spawnOneAt(g, spots[i].x, spots[i].y, false, spacing)) placed++;
+      }
+      if (placed >= count) break;
     }
-    if (placed < count) {
-      for (let x = 2; x <= 12 && placed < count; x++) {
-        for (let y = 2; y <= 7 && placed < count; y++) {
-          if (spawnOneAt(g, x, y, false)) placed++;
+    fixUnreachableMonsters(g);
+    spreadClusteredMonsters(g);
+    fixUnreachableMonsters(g);
+    while (placed < count && (g.mapMonsters || []).length < count) {
+      const spots2 = collectSpawnSpots(g, false, 2);
+      let added = false;
+      for (const s of spots2) {
+        if ((g.mapMonsters || []).length >= count) break;
+        if (spawnOneAt(g, s.x, s.y, false, 2)) {
+          placed++;
+          added = true;
         }
       }
+      if (!added) break;
     }
+    spreadClusteredMonsters(g);
+    fixUnreachableMonsters(g);
     const themeName = g.mapTheme?.name || "未知";
     const pool = global.STAGE_MONSTER_POOLS?.[(g.stage || 1) - 1];
     const mobHint = pool?.entries?.length ? pool.entries.map((e) => e.name).filter((n, i, a) => a.indexOf(n) === i).slice(0, 3).join("、") : "";
@@ -675,6 +861,9 @@
       }
     }
     g.stagePhase = "boss";
+    fixUnreachableMonsters(g);
+    spreadClusteredMonsters(g);
+    fixUnreachableMonsters(g);
     g.message = placed ? `第 ${g.stage || 1} 關首領現身於地圖中央！` : `第 ${g.stage || 1} 關首領出現！`;
   }
 
@@ -898,6 +1087,8 @@
       g.message = `${bossMsg} · ${g.message}`;
       return;
     }
+    spreadClusteredMonsters(g);
+    fixUnreachableMonsters(g);
     if (countNormals(g) === 0 && g.stagePhase !== "boss") {
       spawnBoss(g);
     }
@@ -975,6 +1166,8 @@
       if (!g.stage) g.stage = 1;
       if (!g.stagePhase) g.stagePhase = "normal";
       spawnStageNormals(g);
+    } else {
+      fixUnreachableMonsters(g);
     }
   }
 
@@ -1394,6 +1587,8 @@
       if (!g.stage) g.stage = 1;
       spawnStageNormals(g);
     } else if (WorldView?.ensureMapConnectivity) {
+      WorldView.applyMapBorder?.(g.worldTiles);
+      WorldView.stripDeadEnds?.(g.worldTiles);
       WorldView.ensureMapConnectivity(g.worldTiles, 1, 1);
       if (g.mapX < 1) g.mapX = 1;
       if (g.mapY < 1) g.mapY = 1;
@@ -1401,6 +1596,8 @@
         g.mapX = 1;
         g.mapY = 1;
       }
+      spreadClusteredMonsters(g);
+      fixUnreachableMonsters(g);
       if (countNormals(g) === 0 && countBosses(g) === 0 && g.stagePhase !== "boss") {
         spawnBoss(g);
       }

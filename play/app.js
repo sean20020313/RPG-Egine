@@ -213,7 +213,7 @@ function renderMapHint(view) {
     return;
   }
   const phase = view.boss_active ? "首領戰" : `小怪 ${view.normals_left ?? 0}/8`;
-  el.textContent = `第 ${view.stage}/${maxS} 關${theme} · ${phase} · WASD · 空白鍵攻擊 · 1/2 技能`;
+  el.textContent = `第 ${view.stage}/${maxS} 關${theme} · ${phase} · ▓=地圖邊界(不可走) · ✕=牆 · ≈=水 · WASD · 空白攻擊`;
 }
 
 function itemMeta(name) {

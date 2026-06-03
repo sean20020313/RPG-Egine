@@ -17,6 +17,22 @@
     return x >= 0 && y >= 0 && x < COLS && y < ROWS;
   }
 
+  function isMapBorder(x, y) {
+    return x === 0 || y === 0 || x === COLS - 1 || y === ROWS - 1;
+  }
+
+  /** 地圖最外圈：不可走、視覺上與草地明顯區分 */
+  function applyMapBorder(map) {
+    for (let x = 0; x < COLS; x++) {
+      map[0][x] = T.WALL;
+      map[ROWS - 1][x] = T.WALL;
+    }
+    for (let y = 0; y < ROWS; y++) {
+      map[y][0] = T.WALL;
+      map[y][COLS - 1] = T.WALL;
+    }
+  }
+
   function isBossCell(x, y) {
     const { x: cx, y: cy } = MAP_CENTER;
     return Math.abs(x - cx) <= 1 && Math.abs(y - cy) <= 1;
@@ -48,10 +64,11 @@
     return k === T.FLOOR || k === T.PROP || k === T.VILLAGE || k === T.BRIDGE;
   }
 
-  function bfsPath(map, x0, y0, x1, y1) {
+  function bfsPath(map, x0, y0, x1, y1, blocked) {
     if (x0 === x1 && y0 === y1) return true;
-    if (!isWalkableCell(map, x0, y0) || !isWalkableCell(map, x1, y1)) return false;
     const key = (x, y) => `${x},${y}`;
+    const pass = (x, y) => isWalkableCell(map, x, y) && !(blocked && blocked.has(key(x, y)));
+    if (!pass(x0, y0) || !pass(x1, y1)) return false;
     const q = [[x0, y0]];
     const seen = new Set([key(x0, y0)]);
     const dirs = [
@@ -65,13 +82,36 @@
       for (const [dx, dy] of dirs) {
         const nx = x + dx;
         const ny = y + dy;
-        if (!isWalkableCell(map, nx, ny)) continue;
+        if (!pass(nx, ny)) continue;
         const k = key(nx, ny);
         if (seen.has(k)) continue;
         if (nx === x1 && ny === y1) return true;
         seen.add(k);
         q.push([nx, ny]);
       }
+    }
+    return false;
+  }
+
+  /** 玩家能否走到怪物旁邊一格（近戰可攻擊）；blocked 為 "x,y" 字串 Set，通常為其他魔物佔格 */
+  function canPlayerMeleeMonster(map, px, py, mx, my, blocked) {
+    if (!isWalkableCell(map, mx, my)) return false;
+    const key = (x, y) => `${x},${y}`;
+    const blk = blocked || null;
+    const pass = (x, y) => isWalkableCell(map, x, y) && !(blk && blk.has(key(x, y)));
+    if (!pass(px, py)) return false;
+    if (px === mx && py === my) return true;
+    const dirs = [
+      [0, 1],
+      [0, -1],
+      [1, 0],
+      [-1, 0],
+    ];
+    for (const [dx, dy] of dirs) {
+      const ax = mx + dx;
+      const ay = my + dy;
+      if (!pass(ax, ay)) continue;
+      if (bfsPath(map, px, py, ax, ay, blk)) return true;
     }
     return false;
   }
@@ -331,6 +371,121 @@
     }
   }
 
+  const NEIGH4 = [
+    [0, 1],
+    [0, -1],
+    [1, 0],
+    [-1, 0],
+  ];
+
+  function countWalkableNeighbors(map, x, y) {
+    let n = 0;
+    for (const [dx, dy] of NEIGH4) {
+      if (isWalkableCell(map, x + dx, y + dy)) n++;
+    }
+    return n;
+  }
+
+  function isDeadEndWalkable(map, x, y) {
+    if (!isWalkableCell(map, x, y)) return false;
+    if (isSpawnCell(x, y) || isBossCell(x, y)) return false;
+    const k = map[y][x];
+    if (k === T.BRIDGE || k === T.VILLAGE || k === T.BUILDING) return false;
+    return countWalkableNeighbors(map, x, y) === 1;
+  }
+
+  /** 移除單向死巷（保留村莊／橋／首領區） */
+  function stripDeadEnds(map) {
+    let changed = true;
+    let guard = 0;
+    while (changed && guard++ < 140) {
+      changed = false;
+      for (let y = 1; y < ROWS - 1; y++) {
+        for (let x = 1; x < COLS - 1; x++) {
+          if (!isDeadEndWalkable(map, x, y)) continue;
+          map[y][x] = T.WALL;
+          changed = true;
+        }
+      }
+    }
+  }
+
+  function shuffleCoords(cells, seed) {
+    let s = seed >>> 0 || 1;
+    for (let i = cells.length - 1; i > 0; i--) {
+      s = mapRand(s);
+      const j = s % (i + 1);
+      const t = cells[i];
+      cells[i] = cells[j];
+      cells[j] = t;
+    }
+    return s;
+  }
+
+  function interiorCoords(map, skipBoss) {
+    const out = [];
+    for (let y = 1; y < ROWS - 1; y++) {
+      for (let x = 1; x < COLS - 1; x++) {
+        if (isSpawnCell(x, y)) continue;
+        if (skipBoss && isBossCell(x, y)) continue;
+        out.push([x, y]);
+      }
+    }
+    return out;
+  }
+
+  function canPlaceRandomWall(map, x, y) {
+    if (isSpawnCell(x, y) || isBossCell(x, y)) return false;
+    const prev = map[y][x];
+    if (prev !== T.FLOOR && prev !== T.PROP) return false;
+    map[y][x] = T.WALL;
+    let ok = true;
+    for (const [dx, dy] of NEIGH4) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (!isWalkableCell(map, nx, ny)) continue;
+      if (countWalkableNeighbors(map, nx, ny) <= 1) {
+        ok = false;
+        break;
+      }
+    }
+    map[y][x] = prev;
+    return ok;
+  }
+
+  function scatterRandomWalls(map, seed, stage) {
+    const cells = interiorCoords(map, true);
+    let s = shuffleCoords(cells, seed);
+    const density = 0.09 + stage * 0.015;
+    const target = Math.max(8, Math.floor(cells.length * density));
+    let placed = 0;
+    for (const [x, y] of cells) {
+      if (placed >= target) break;
+      s = mapRand(s);
+      if (s % 4 === 0) continue;
+      if (!canPlaceRandomWall(map, x, y)) continue;
+      map[y][x] = T.WALL;
+      placed++;
+    }
+    return s;
+  }
+
+  function scatterRandomDecor(map, seed, theme) {
+    const cells = interiorCoords(map, true);
+    let s = shuffleCoords(cells, seed ^ 0x9e3779b9);
+    const target = Math.max(10, Math.floor(cells.length * 0.14));
+    let placed = 0;
+    for (const [x, y] of cells) {
+      if (placed >= target) break;
+      s = mapRand(s);
+      if (map[y][x] !== T.FLOOR) continue;
+      if (s % 3 !== 0) continue;
+      setTile(map, x, y, T.PROP);
+      placed++;
+    }
+    return s;
+  }
+
   const MAX_MAP_STAGES = 4;
 
   const MAP_THEMES = [
@@ -407,25 +562,22 @@
 
   function generateMapTiles(seed, stage) {
     const theme = getThemeForStage(stage);
-    const map = [];
-    let s = seed >>> 0 || 1;
-    for (let y = 0; y < ROWS; y++) {
-      const row = [];
-      for (let x = 0; x < COLS; x++) {
-        s = (Math.imul(s, 1103515245) + 12345) >>> 0;
-        if (x === 0 || y === 0 || x === COLS - 1 || y === ROWS - 1) row.push(2);
-        else if (x <= 2 && y <= 2) row.push(0);
-        else if (s % (theme.wallMod + 2) === 0) row.push(2);
-        else if (s % theme.decorMod === 0) row.push(1);
-        else row.push(0);
-      }
-      map.push(row);
-    }
-    map[1][1] = 0;
+    const map = Array.from({ length: ROWS }, () => Array(COLS).fill(T.FLOOR));
+    map[1][1] = T.FLOOR;
     clearBossArena(map);
+
+    let s = scatterRandomWalls(map, seed, stage);
+    s = scatterRandomDecor(map, s, theme);
+    ensureMapConnectivity(map, 1, 1);
+    stripDeadEnds(map);
     ensureMapConnectivity(map, 1, 1);
     clearBossArena(map);
+
     applyStageFeatures(map, s, theme);
+    stripDeadEnds(map);
+    ensureMapConnectivity(map, 1, 1);
+    clearBossArena(map);
+    applyMapBorder(map);
     return { tiles: map, theme };
   }
 
@@ -578,6 +730,7 @@
     applyThemeRiver(map, theme);
     applyThemeVillage(map, theme);
     sprinkleExtraProps(map, seed, theme);
+    stripDeadEnds(map);
     ensureMapConnectivity(map, 1, 1);
     clearBossArena(map);
   }
@@ -601,6 +754,14 @@
   }
 
   /* —— 五關主題：地板／牆／造景 —— */
+  function strokeTileFrame(ctx, px, py, color, width) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width || 4;
+    ctx.strokeRect(px + 3, py + 3, TILE - 6, TILE - 6);
+    ctx.restore();
+  }
+
   function drawFloorTile(ctx, px, py, tx, ty, theme) {
     const t = theme || MAP_THEMES[0];
     const base = (tx + ty) % 2 === 0 ? t.floorA : t.floorB;
@@ -620,15 +781,54 @@
     }
   }
 
+  function drawBorderTile(ctx, px, py, theme) {
+    const edge = theme?.id === "snow" ? "#1a2430" : theme?.id === "volcano" ? "#180808" : theme?.id === "crystal" ? "#120820" : "#141820";
+    const rock = theme?.id === "snow" ? "#3a4a58" : theme?.id === "volcano" ? "#4a2820" : theme?.id === "crystal" ? "#382858" : "#2a3038";
+    const hi = theme?.id === "snow" ? "#6a8090" : theme?.id === "volcano" ? "#8a5040" : theme?.id === "crystal" ? "#7060a0" : "#4a5560";
+    fillPix(ctx, px, py, TILE, TILE, edge);
+    fillPix(ctx, px + 4, py + 4, TILE - 8, TILE - 8, rock);
+    fillPix(ctx, px, py, TILE, 5, hi);
+    fillPix(ctx, px, py + TILE - 5, TILE, 5, "#08080c");
+    fillPix(ctx, px, py, 5, TILE, "#101018");
+    fillPix(ctx, px + TILE - 5, py, 5, TILE, "#08080c");
+    for (let i = 8; i < TILE - 8; i += 10) {
+      fillPix(ctx, px + i, py + 6, 4, TILE - 12, "rgba(0,0,0,0.35)");
+      fillPix(ctx, px + 6, py + i, TILE - 12, 4, "rgba(0,0,0,0.28)");
+    }
+    ctx.save();
+    ctx.fillStyle = "rgba(200, 210, 220, 0.55)";
+    ctx.font = "bold 18px system-ui,sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("▓", px + TILE / 2, py + TILE / 2 + 1);
+    ctx.restore();
+  }
+
   function drawWallTile(ctx, px, py, theme) {
-    const t = theme || MAP_THEMES[0];
-    fillPix(ctx, px, py, TILE, TILE, t.wallSide);
-    fillPix(ctx, px, py, TILE, 6, t.wallTop);
-    fillPix(ctx, px, py + 6, TILE, TILE - 6, t.wallFront);
-    if (t.id === "snow") fillPix(ctx, px + 4, py, TILE - 8, 4, "#e8f4ff");
-    if (t.id === "volcano") fillPix(ctx, px + 6, py + 20, 8, 3, "#ff8040");
-    if (t.id === "ruins") fillPix(ctx, px + 2, py + 4, 6, 8, "#606068");
-    if (t.id === "crystal") fillPix(ctx, px + 8, py + 2, 4, 10, "#a090e8");
+    fillPix(ctx, px, py, TILE, TILE, "#14141c");
+    fillPix(ctx, px + 3, py + 3, TILE - 6, TILE - 6, "#383848");
+    fillPix(ctx, px, py, TILE, 6, "#5a5a6a");
+    fillPix(ctx, px, py + 8, TILE, 4, "#2a2a34");
+    fillPix(ctx, px + 10, py + 14, TILE - 12, 3, "#222230");
+    fillPix(ctx, px, 6, py + 20, TILE - 12, 4, "#1a1a24");
+    ctx.save();
+    ctx.strokeStyle = "#ff5533";
+    ctx.lineWidth = 5;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(px + 14, py + 14);
+    ctx.lineTo(px + TILE - 14, py + TILE - 14);
+    ctx.moveTo(px + TILE - 14, py + 14);
+    ctx.lineTo(px + 14, py + TILE - 14);
+    ctx.stroke();
+    ctx.restore();
+    ctx.save();
+    ctx.fillStyle = "#ffe0c0";
+    ctx.font = "bold 22px system-ui,sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("✕", px + TILE / 2, py + TILE / 2 + 2);
+    ctx.restore();
   }
 
   function drawDecorTile(ctx, px, py, theme) {
@@ -639,26 +839,29 @@
   function drawWaterTile(ctx, px, py, theme, frame) {
     const wave = frame % 24 < 12;
     if (theme.id === "meadow") {
-      fillPix(ctx, px, py, TILE, TILE, wave ? "#2878b8" : "#2068a8");
-      fillPix(ctx, px + 4, py + 8, TILE - 8, 6, wave ? "#48a8e8" : "#3898d8");
-      fillPix(ctx, px + 10, py + 14, 8, 4, "#60c0f0");
+      fillPix(ctx, px, py, TILE, TILE, wave ? "#1a68c8" : "#1458b0");
+      fillPix(ctx, px + 4, py + 8, TILE - 8, 6, wave ? "#38b8ff" : "#28a0e8");
+      fillPix(ctx, px + 10, py + 14, 8, 4, "#80e8ff");
     } else if (theme.id === "snow") {
-      fillPix(ctx, px, py, TILE, TILE, wave ? "#a8c8e8" : "#90b8d8");
-      fillPix(ctx, px + 6, py + 10, TILE - 12, 4, "#e8f4ff");
-      fillPix(ctx, px + 2, py + 18, 10, 3, "#c0d8f0");
+      fillPix(ctx, px, py, TILE, TILE, wave ? "#78b0e0" : "#5898d0");
+      fillPix(ctx, px + 6, py + 10, TILE - 12, 4, "#e8f8ff");
+      fillPix(ctx, px + 2, py + 18, 10, 3, "#b0d8f8");
     } else if (theme.id === "volcano") {
-      fillPix(ctx, px, py, TILE, TILE, wave ? "#c04018" : "#902810");
-      fillPix(ctx, px + 4, py + 6, TILE - 8, 10, wave ? "#ff7030" : "#e05020");
-      fillPix(ctx, px + 12, py + 16, 8, 6, "#ffcc40");
-    } else if (theme.id === "ruins") {
-      fillPix(ctx, px, py, TILE, TILE, wave ? "#486878" : "#384858");
-      fillPix(ctx, px + 2, py + 12, TILE - 4, 4, "#608898");
-      fillPix(ctx, px + 14, py + 6, 4, 14, "#506070");
+      fillPix(ctx, px, py, TILE, TILE, wave ? "#d04018" : "#a02810");
+      fillPix(ctx, px + 4, py + 6, TILE - 8, 10, wave ? "#ff8830" : "#e05820");
+      fillPix(ctx, px + 12, py + 16, 8, 6, "#ffee60");
     } else {
-      fillPix(ctx, px, py, TILE, TILE, wave ? "#5040a8" : "#403090");
-      fillPix(ctx, px + 6, py + 8, TILE - 12, 8, wave ? "#a090f0" : "#8070e0");
-      fillPix(ctx, px + 4, py + 20, 12, 3, "#d0c0ff");
+      fillPix(ctx, px, py, TILE, TILE, wave ? "#4838a0" : "#382880");
+      fillPix(ctx, px + 6, py + 8, TILE - 12, 8, wave ? "#b0a0ff" : "#9080e8");
+      fillPix(ctx, px + 4, py + 20, 12, 3, "#e8e0ff");
     }
+    ctx.save();
+    ctx.fillStyle = "#e0f8ff";
+    ctx.font = "bold 20px system-ui,sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("≈", px + TILE / 2, py + TILE / 2);
+    ctx.restore();
   }
 
   function drawBridgeTile(ctx, px, py, theme) {
@@ -673,37 +876,14 @@
     } else if (theme.id === "volcano") {
       fillPix(ctx, px + 4, py + 10, TILE - 8, 12, "#4a3028");
       fillPix(ctx, px + 6, py + 12, TILE - 12, 4, "#c06030");
-    } else if (theme.id === "ruins") {
-      fillPix(ctx, px + 2, py + 10, TILE - 4, 10, "#787880");
-      fillPix(ctx, px + 8, py + 12, 6, 8, "#909098");
     } else {
       fillPix(ctx, px + 4, py + 10, TILE - 8, 10, "#7060c0");
       fillPix(ctx, px + 8, py + 12, 8, 6, "#c0b0ff");
     }
   }
 
-  function drawVillageFloorTile(ctx, px, py, theme) {
-    if (theme.id === "meadow") {
-      fillPix(ctx, px, py, TILE, TILE, "#c8a868");
-      fillPix(ctx, px + 4, py + 4, TILE - 8, TILE - 8, "#b89858");
-      fillPix(ctx, px + 8, py + 20, 6, 4, "#9a7848");
-    } else if (theme.id === "snow") {
-      fillPix(ctx, px, py, TILE, TILE, "#d8e4f0");
-      fillPix(ctx, px + 2, py + 2, TILE - 4, TILE - 4, "#c8d8e8");
-    } else if (theme.id === "volcano") {
-      fillPix(ctx, px, py, TILE, TILE, "#5a4038");
-      fillPix(ctx, px + 4, py + 4, TILE - 8, TILE - 8, "#4a3028");
-    } else if (theme.id === "ruins") {
-      fillPix(ctx, px, py, TILE, TILE, "#8a8888");
-      fillPix(ctx, px + 2, py + 2, TILE - 4, TILE - 4, "#7a7878");
-      fillPix(ctx, px + 6, py + 6, 4, 4, "#686870");
-    } else {
-      fillPix(ctx, px, py, TILE, TILE, "#5848a0");
-      fillPix(ctx, px + 4, py + 4, TILE - 8, TILE - 8, "#6858b0");
-    }
-  }
-
   function drawBuildingTile(ctx, px, py, theme, tx, ty) {
+    fillPix(ctx, px, py, TILE, TILE, "#2a2220");
     const v = (tx + ty) % 2;
     if (theme.id === "meadow") {
       fillPix(ctx, px + 6, py + 18, TILE - 12, 10, "#6a5038");
@@ -731,6 +911,61 @@
       fillPix(ctx, px + 2, py + 0, TILE - 4, 8, "#a090f0");
       fillPix(ctx, px + 10, py + 8, 8, 10, "#e0d8ff");
     }
+    ctx.save();
+    ctx.fillStyle = "#ffe8b0";
+    ctx.font = "bold 20px system-ui,sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("屋", px + TILE / 2, py + TILE / 2 + 4);
+    ctx.restore();
+  }
+
+  function drawVillageFloorTile(ctx, px, py, theme) {
+    if (theme.id === "meadow") {
+      fillPix(ctx, px, py, TILE, TILE, "#c8a868");
+      fillPix(ctx, px + 4, py + 4, TILE - 8, TILE - 8, "#b89858");
+      fillPix(ctx, px + 8, py + 20, 6, 4, "#9a7848");
+    } else if (theme.id === "snow") {
+      fillPix(ctx, px, py, TILE, TILE, "#d8e4f0");
+      fillPix(ctx, px + 2, py + 2, TILE - 4, TILE - 4, "#c8d8e8");
+    } else if (theme.id === "volcano") {
+      fillPix(ctx, px, py, TILE, TILE, "#5a4038");
+      fillPix(ctx, px + 4, py + 4, TILE - 8, TILE - 8, "#4a3028");
+    } else {
+      fillPix(ctx, px, py, TILE, TILE, "#5848a0");
+      fillPix(ctx, px + 4, py + 4, TILE - 8, TILE - 8, "#6858b0");
+    }
+  }
+
+  function drawMonsterTileHighlight(ctx, tx, ty, boss) {
+    const px = tx * TILE;
+    const py = ty * TILE;
+    ctx.save();
+    ctx.fillStyle = boss ? "rgba(255, 120, 30, 0.42)" : "rgba(255, 40, 70, 0.38)";
+    ctx.fillRect(px + 4, py + 4, TILE - 8, TILE - 8);
+    ctx.strokeStyle = boss ? "#ffe040" : "#ff3355";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(px + 5, py + 5, TILE - 10, TILE - 10);
+    ctx.restore();
+  }
+
+  function drawMonsterNameTag(ctx, m, boss, barY) {
+    const raw = m.name || "魔物";
+    const label = boss ? "★首領" : raw.length > 8 ? raw.slice(0, 8) + "…" : raw;
+    const fontSize = boss ? 12 : 10;
+    ctx.font = `bold ${fontSize}px system-ui,sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const tw = ctx.measureText(label).width;
+    const th = fontSize + 4;
+    const ty = barY - th - 6;
+    ctx.fillStyle = "rgba(8, 4, 12, 0.82)";
+    ctx.fillRect(-tw / 2 - 5, ty - th / 2, tw + 10, th);
+    ctx.strokeStyle = boss ? "#ffcc44" : "#ff6677";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-tw / 2 - 5, ty - th / 2, tw + 10, th);
+    ctx.fillStyle = boss ? "#fff0a8" : "#ffd0d8";
+    ctx.fillText(label, 0, ty);
   }
 
   function drawMeadowTree(ctx, variant) {
@@ -959,6 +1194,10 @@
   function drawTileWorld(ctx, tx, ty, kind, theme, frame) {
     const px0 = tx * TILE;
     const py0 = ty * TILE;
+    if (isMapBorder(tx, ty)) {
+      drawBorderTile(ctx, px0, py0, theme);
+      return;
+    }
     if (kind === T.WALL) drawWallTile(ctx, px0, py0, theme);
     else if (kind === T.WATER) drawWaterTile(ctx, px0, py0, theme, frame || 0);
     else if (kind === T.BRIDGE) drawBridgeTile(ctx, px0, py0, theme);
@@ -1316,16 +1555,12 @@
   }
 
   function monsterHpColor(m, theme) {
-    if (m.isBoss) return "#ffd050";
-    const id = m.themeId || theme?.id;
-    if (id === "snow") return "#88c8f0";
-    if (id === "volcano") return "#ff7040";
-    if (id === "ruins") return "#c0c0d0";
-    if (id === "crystal") return "#c0a0ff";
-    return "#e85040";
+    if (m.isBoss) return "#ffee44";
+    return "#ff3355";
   }
 
   function drawMonsterSprite(ctx, tx, ty, m, frame, monsterAttackFx, mapTheme) {
+    drawMonsterTileHighlight(ctx, tx, ty, !!m.isBoss);
     const cx = tx * TILE + TILE / 2;
     const cy = ty * TILE + TILE / 2;
     const boss = !!(m.isBoss);
@@ -1340,10 +1575,17 @@
     }
     ctx.save();
     ctx.translate(cx + lungeX, cy + lungeY);
-    if (attacking) {
-      ctx.fillStyle = "rgba(255, 60, 40, 0.35)";
+    if (!boss) {
+      ctx.strokeStyle = "#ff2244";
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(0, 0, 18, 0, Math.PI * 2);
+      ctx.ellipse(0, 4, 20, 16, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (attacking) {
+      ctx.fillStyle = "rgba(255, 60, 40, 0.5)";
+      ctx.beginPath();
+      ctx.arc(0, 0, 22, 0, Math.PI * 2);
       ctx.fill();
     }
     if (boss) {
@@ -1360,11 +1602,14 @@
     const barY = boss ? -38 : m.typeIndex >= 8 ? -24 : -22;
     const hpPct = m.maxHp > 0 ? Math.max(0, m.hp / m.maxHp) : 0;
     const hpCol = monsterHpColor(m, mapTheme);
-    fillPix(ctx, -w / 2, barY, w, 5, "#1a1010");
-    fillPix(ctx, -w / 2, barY, w * hpPct, 5, hpCol);
+    const barH = boss ? 7 : 6;
+    fillPix(ctx, -w / 2 - 1, barY - 1, w + 2, barH + 2, "#ffffff");
+    fillPix(ctx, -w / 2, barY, w, barH, "#1a1010");
+    fillPix(ctx, -w / 2, barY, Math.max(2, w * hpPct), barH, hpCol);
+    drawMonsterNameTag(ctx, m, boss, barY);
     if (boss) {
-      fillPix(ctx, -w / 2, barY - 6, w, 4, "#4a2808");
-      fillPix(ctx, -w / 2 + 2, barY - 5, Math.max(4, w - 4), 2, "#ffcc66");
+      fillPix(ctx, -w / 2, barY - 8, w, 5, "#4a2808");
+      fillPix(ctx, -w / 2 + 2, barY - 7, Math.max(4, w - 4), 3, "#ffcc66");
     }
     ctx.restore();
   }
@@ -1542,20 +1787,24 @@
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
         const k = tiles[y][x];
-        let col = "#4a8a52";
-        if (k === T.WALL) col = "#6a6258";
-        else if (k === T.WATER) col = "#2878b8";
-        else if (k === T.VILLAGE) col = "#c8a868";
-        else if (k === T.BUILDING) col = "#8a6848";
-        else if (k === T.BRIDGE) col = "#8a7858";
-        else if (k === T.PROP) col = "#2d5a3a";
+        let col = "#3a7a48";
+        if (k === T.WALL) col = isMapBorder(x, y) ? "#1a2030" : "#884433";
+        else if (k === T.WATER) col = "#2088e8";
+        else if (k === T.VILLAGE) col = "#d8b060";
+        else if (k === T.BUILDING) col = "#e87830";
+        else if (k === T.BRIDGE) col = "#e8c840";
+        else if (k === T.PROP) col = "#48a858";
         ctx.fillStyle = col;
         ctx.fillRect(x * scale, y * scale, Math.ceil(scale), Math.ceil(scale));
       }
     }
     for (const m of monsters || []) {
-      ctx.fillStyle = "#e85040";
-      ctx.fillRect(m.x * scale + 1, m.y * scale + 1, scale - 2, scale - 2);
+      ctx.fillStyle = m.isBoss ? "#ffcc22" : "#ff2244";
+      ctx.strokeStyle = m.isBoss ? "#fff8c0" : "#ffffff";
+      ctx.lineWidth = 1;
+      const pad = m.isBoss ? 0 : 1;
+      ctx.fillRect(m.x * scale + pad, m.y * scale + pad, scale - pad * 2, scale - pad * 2);
+      ctx.strokeRect(m.x * scale + pad, m.y * scale + pad, scale - pad * 2, scale - pad * 2);
     }
     ctx.fillStyle = "#7ec8ff";
     ctx.strokeStyle = "#fff";
@@ -1713,6 +1962,10 @@
     MAP_CENTER,
     isWalkable,
     ensureMapConnectivity,
+    applyMapBorder,
+    canPlayerMeleeMonster,
+    openBarrierCell,
+    stripDeadEnds,
     getJob,
     prepareCanvas,
     drawHeroPortrait,
