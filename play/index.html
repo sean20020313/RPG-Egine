@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-Hant">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RPG Adventure</title>
+  <title>RPG 冒險</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -13,82 +13,83 @@
     <header class="brand">
       <div class="brand-mark" aria-hidden="true"></div>
       <div class="brand-text">
-        <h1>RPG Adventure</h1>
-        <p class="brand-tag">HD-2D · One Hero · One Story</p>
+        <h1>RPG 冒險</h1>
+        <p class="brand-tag">HD-2D · 單英雄 · 關卡制</p>
       </div>
     </header>
 
     <section class="glass setup" id="setup">
-      <h2 class="panel-title">Choose Your Hero</h2>
-      <p class="panel-hint">Each class has a unique look and story. Pick one hero for this adventure.</p>
+      <h2 class="panel-title">選擇英雄</h2>
+      <p class="panel-hint">每種職業有獨特外型、故事與攻擊方式。本局僅能選擇一位英雄。</p>
       <div class="setup-inner setup-class">
         <div class="class-grid" id="class-grid">
           <button type="button" class="class-pick on" data-job="warrior">
             <canvas class="class-preview" width="72" height="72" aria-hidden="true"></canvas>
-            <span class="class-name">Warrior</span>
-            <span class="class-hero-name">Aldric</span>
+            <span class="class-name">戰士</span>
+            <span class="class-hero-name">阿爾德里克</span>
           </button>
           <button type="button" class="class-pick" data-job="mage">
             <canvas class="class-preview" width="72" height="72" aria-hidden="true"></canvas>
-            <span class="class-name">Mage</span>
-            <span class="class-hero-name">Lyra</span>
+            <span class="class-name">法師</span>
+            <span class="class-hero-name">萊拉</span>
           </button>
           <button type="button" class="class-pick" data-job="priest">
             <canvas class="class-preview" width="72" height="72" aria-hidden="true"></canvas>
-            <span class="class-name">Priest</span>
-            <span class="class-hero-name">Elara</span>
+            <span class="class-name">牧師</span>
+            <span class="class-hero-name">艾拉</span>
           </button>
           <button type="button" class="class-pick" data-job="thief">
             <canvas class="class-preview" width="72" height="72" aria-hidden="true"></canvas>
-            <span class="class-name">Thief</span>
-            <span class="class-hero-name">Kade</span>
+            <span class="class-name">盜賊</span>
+            <span class="class-hero-name">凱德</span>
           </button>
         </div>
         <div class="setup-story" id="setup-story">
-          <h3 class="story-title" id="setup-story-title">Oath of the Fallen Fort</h3>
+          <h3 class="story-title" id="setup-story-title">落堡之誓</h3>
           <p class="story-intro" id="setup-story-intro"></p>
         </div>
         <div class="setup-actions">
-          <button type="button" id="btnNew" class="btn-text btn-primary">New Game</button>
-          <button type="button" id="btnResume" class="btn-text btn-secondary">Continue</button>
-          <button type="button" id="btnClearSave" class="btn-text btn-danger">Clear Save</button>
+          <button type="button" id="btnNew" class="btn-text btn-primary">新遊戲</button>
+          <button type="button" id="btnResume" class="btn-text btn-secondary">繼續遊戲</button>
+          <button type="button" id="btnClearSave" class="btn-text btn-danger">清除存檔</button>
         </div>
       </div>
     </section>
 
     <section class="glass game-root hidden" id="game">
       <nav class="hud-pills hud-minimal">
-        <button type="button" id="btn-home" class="pill pill-btn">Home</button>
-        <button type="button" id="btn-restart" class="pill pill-btn">Restart</button>
+        <button type="button" id="tab-quests" class="pill pill-btn pill-tab on" data-tab="quests">任務</button>
+        <button type="button" id="tab-bag" class="pill pill-btn pill-tab" data-tab="bag">背包</button>
+        <button type="button" id="btn-home" class="pill pill-btn">主選單</button>
+        <button type="button" id="btn-restart" class="pill pill-btn">重新開始</button>
       </nav>
 
       <div class="layout">
         <aside class="rail" id="rail-story">
-          <h2 class="rail-title">Story</h2>
-          <p class="story-chapter" id="story-title">—</p>
-          <p class="story-intro" id="story-intro">—</p>
-          <h3 class="rail-sub">Quests</h3>
-          <div id="quest-list" class="quest-list"></div>
-          <h2 class="rail-title rail-hero-head">Hero</h2>
+          <div id="panel-quests" class="rail-panel">
+            <h2 class="rail-title">故事</h2>
+            <p class="story-chapter" id="story-title">—</p>
+            <p class="story-intro" id="story-intro">—</p>
+            <p class="quest-complete-banner hidden" id="quest-complete-banner">所有故事任務已完成！</p>
+            <h3 class="rail-sub">任務日誌</h3>
+            <div id="quest-list" class="quest-list"></div>
+          </div>
+          <div id="panel-bag" class="rail-panel hidden">
+            <h2 class="rail-title">背包</h2>
+            <p class="bag-hint">點擊道具即可在地圖上使用。</p>
+            <div id="bag-list" class="bag-list"></div>
+            <p class="bag-empty hidden" id="bag-empty">背包是空的</p>
+          </div>
+          <h2 class="rail-title rail-hero-head">英雄</h2>
           <div id="party-list" class="party-list"></div>
         </aside>
 
         <div class="stage-wrap">
           <div id="scene-explore" class="stage stage-explore">
             <div class="map-frame hd2d-frame">
-              <canvas id="world-canvas" class="world-canvas" width="480" height="320" aria-label="Game map"></canvas>
+              <canvas id="world-canvas" class="world-canvas" width="480" height="320" aria-label="遊戲地圖"></canvas>
             </div>
-            <p class="map-hint">Move: WASD / arrows · Attack (adjacent): Attack or Space</p>
-            <div class="map-controls">
-              <div class="dpad" id="dpad">
-                <button type="button" class="dpad-btn d-up" data-dir="up">Up</button>
-                <button type="button" class="dpad-btn d-left" data-dir="left">Left</button>
-                <span class="dpad-spacer" aria-hidden="true"></span>
-                <button type="button" class="dpad-btn d-right" data-dir="right">Right</button>
-                <button type="button" class="dpad-btn d-down" data-dir="down">Down</button>
-              </div>
-              <button type="button" id="btn-map-atk" class="map-atk-btn">Attack</button>
-            </div>
+            <p class="map-hint" id="map-hint">WASD / 方向鍵移動 · 空白鍵攻擊 · B 背包 · Q 任務</p>
           </div>
         </div>
       </div>
@@ -97,9 +98,10 @@
 
   <div id="fx-layer" class="fx-layer" aria-hidden="true"></div>
 
-  <script src="./stories.js?v=6"></script>
-  <script src="./engine.js?v=6"></script>
-  <script src="./world.js?v=6"></script>
-  <script src="./app.js?v=6"></script>
+  <script src="./stories.js?v=9"></script>
+  <script src="./items.js?v=10"></script>
+  <script src="./engine.js?v=11"></script>
+  <script src="./world.js?v=11"></script>
+  <script src="./app.js?v=11"></script>
 </body>
 </html>

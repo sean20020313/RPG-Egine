@@ -13,11 +13,124 @@
     { id: "thief", name: "Thief", hue: 160, accent: "#5ee8a8", cape: "#1a5040" },
   ];
 
-  const MONSTER_KINDS = ["slime", "goblin", "wolf", "gargoyle"];
+  const MONSTER_KINDS = ["slime", "goblin", "wolf", "gargoyle", "bat", "skeleton", "spider", "orc"];
 
   function fillPix(ctx, x, y, w, h, color) {
     ctx.fillStyle = color;
     ctx.fillRect(Math.floor(x), Math.floor(y), w, h);
+  }
+
+  const MAP_CENTER = { x: Math.floor(COLS / 2), y: Math.floor(ROWS / 2) };
+
+  function getMapCenter() {
+    return { x: MAP_CENTER.x, y: MAP_CENTER.y };
+  }
+
+  function labelWalkableRegions(map) {
+    const ids = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+    let nextId = 1;
+    const dirs = [
+      [0, 1],
+      [0, -1],
+      [1, 0],
+      [-1, 0],
+    ];
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        if (map[y][x] === 2 || ids[y][x]) continue;
+        const q = [[x, y]];
+        ids[y][x] = nextId;
+        while (q.length) {
+          const [cx, cy] = q.pop();
+          for (const [dx, dy] of dirs) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+            if (map[ny][nx] === 2 || ids[ny][nx]) continue;
+            ids[ny][nx] = nextId;
+            q.push([nx, ny]);
+          }
+        }
+        nextId++;
+      }
+    }
+    return ids;
+  }
+
+  /** 打通孤島，避免障礙物形成無法到達的死路 */
+  function ensureMapConnectivity(map, startX, startY) {
+    const sx = Math.max(1, Math.min(COLS - 2, startX | 0));
+    const sy = Math.max(1, Math.min(ROWS - 2, startY | 0));
+    if (map[sy][sx] === 2) map[sy][sx] = 0;
+
+    const dirs = [
+      [0, 1],
+      [0, -1],
+      [1, 0],
+      [-1, 0],
+    ];
+
+    for (let pass = 0; pass < 96; pass++) {
+      const regions = labelWalkableRegions(map);
+      const startRegion = regions[sy][sx];
+      let allOk = true;
+      for (let y = 1; y < ROWS - 1 && allOk; y++) {
+        for (let x = 1; x < COLS - 1; x++) {
+          if (map[y][x] !== 2 && regions[y][x] !== startRegion) {
+            allOk = false;
+            break;
+          }
+        }
+      }
+      if (allOk) break;
+
+      let opened = false;
+      for (let y = 1; y < ROWS - 1 && !opened; y++) {
+        for (let x = 1; x < COLS - 1; x++) {
+          if (map[y][x] !== 2) continue;
+          const regionIds = new Set();
+          for (const [dx, dy] of dirs) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (map[ny][nx] === 2) continue;
+            regionIds.add(regions[ny][nx]);
+          }
+          if (regionIds.size >= 2 && regionIds.has(startRegion)) {
+            map[y][x] = 0;
+            opened = true;
+            break;
+          }
+        }
+      }
+      if (opened) continue;
+
+      for (let y = 1; y < ROWS - 1 && !opened; y++) {
+        for (let x = 1; x < COLS - 1; x++) {
+          if (map[y][x] === 2 || regions[y][x] === startRegion) continue;
+          for (const [dx, dy] of dirs) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (map[ny][nx] !== 2) continue;
+            map[ny][nx] = 0;
+            opened = true;
+            break;
+          }
+          if (opened) break;
+        }
+      }
+    }
+  }
+
+  function clearBossArena(map) {
+    const { x: cx, y: cy } = MAP_CENTER;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const x = cx + dx;
+        const y = cy + dy;
+        if (x < 1 || y < 1 || x >= COLS - 1 || y >= ROWS - 1) continue;
+        map[y][x] = 0;
+      }
+    }
   }
 
   function buildFixedMap(seed) {
@@ -28,11 +141,15 @@
       for (let x = 0; x < COLS; x++) {
         s = (Math.imul(s, 1103515245) + 12345) >>> 0;
         if (x === 0 || y === 0 || x === COLS - 1 || y === ROWS - 1) row.push(2);
-        else row.push(s % 7 === 0 ? 2 : s % 5 === 0 ? 1 : 0);
+        else if (x <= 2 && y <= 2) row.push(0);
+        else row.push(s % 12 === 0 ? 2 : s % 6 === 0 ? 1 : 0);
       }
       map.push(row);
     }
     map[1][1] = 0;
+    clearBossArena(map);
+    ensureMapConnectivity(map, 1, 1);
+    clearBossArena(map);
     return map;
   }
 
@@ -213,6 +330,139 @@
     fillPix(ctx, -2, -4, 8, 4, "#c0a080");
   }
 
+  /* —— Unique boss silhouettes (variant 0–4) —— */
+  function drawBossAura(ctx, frame) {
+    const pulse = 4 + Math.sin(frame * 0.12) * 3;
+    ctx.fillStyle = "rgba(240, 160, 40, 0.22)";
+    ctx.beginPath();
+    ctx.ellipse(0, 4, 22 + pulse, 10 + pulse * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 220, 100, 0.55)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(0, 4, 18 + pulse * 0.6, 8, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  function drawBossDemon(ctx, frame) {
+    const bob = Math.sin(frame * 0.1) * 2;
+    fillPix(ctx, -16, -8 + bob, 32, 22, "#4a1868");
+    fillPix(ctx, -14, -20 + bob, 28, 14, "#6a28a0");
+    fillPix(ctx, -10, -28 + bob, 20, 10, "#2a0838");
+    fillPix(ctx, -18, -24 + bob, 6, 14, "#8a3030");
+    fillPix(ctx, 12, -24 + bob, 6, 14, "#8a3030");
+    fillPix(ctx, -6, -14 + bob, 4, 4, "#ff4040");
+    fillPix(ctx, 2, -14 + bob, 4, 4, "#ff4040");
+    fillPix(ctx, -4, -4 + bob, 8, 6, "#e8c040");
+    fillPix(ctx, -8, 8 + bob, 6, 10, "#3a1850");
+    fillPix(ctx, 2, 8 + bob, 6, 10, "#3a1850");
+  }
+
+  function drawBossGolem(ctx, frame) {
+    const crack = frame % 20 < 10 ? 0 : 1;
+    fillPix(ctx, -20, -6, 40, 26, "#5a5a68");
+    fillPix(ctx, -18, -22, 36, 18, "#7a7a90");
+    fillPix(ctx, -12, -18, 8, 6, "#a0a0b8");
+    fillPix(ctx, 4, -18, 8, 6, "#a0a0b8");
+    fillPix(ctx, -6, -8 + crack, 12, 8, "#c8c8e0");
+    fillPix(ctx, -22, -2, 8, 16, "#484858");
+    fillPix(ctx, 14, -2, 8, 16, "#484858");
+    fillPix(ctx, -4, 14, 10, 8, "#404050");
+    fillPix(ctx, -14, -28, 28, 6, "#e8c060");
+  }
+
+  function drawBossShrine(ctx, frame) {
+    const float = Math.sin(frame * 0.14) * 3;
+    fillPix(ctx, -14, -18 + float, 28, 20, "#1a3048");
+    fillPix(ctx, -10, -28 + float, 20, 12, "#88e8ff");
+    fillPix(ctx, -6, -22 + float, 12, 8, "#e0ffff");
+    fillPix(ctx, -4, -8 + float, 8, 8, "#4080a0");
+    fillPix(ctx, -20, -10 + float, 6, 18, "#60c0e8");
+    fillPix(ctx, 14, -10 + float, 6, 18, "#60c0e8");
+    fillPix(ctx, -3, -26 + float, 6, 4, "#ff6080");
+  }
+
+  function drawBossShadow(ctx, frame) {
+    const wisp = Math.sin(frame * 0.2) * 4;
+    fillPix(ctx, -18 + wisp, -12, 36, 28, "#181828");
+    fillPix(ctx, -14, -20, 28, 14, "#303048");
+    fillPix(ctx, -10, -14, 6, 5, "#c060ff");
+    fillPix(ctx, 0, -14, 6, 5, "#c060ff");
+    fillPix(ctx, 10, -12, 6, 5, "#c060ff");
+    fillPix(ctx, -6, -6, 4, 4, "#ff80ff");
+    fillPix(ctx, -20 - wisp, 0, 8, 20, "#202038");
+    fillPix(ctx, 12 + wisp, 0, 8, 20, "#202038");
+    fillPix(ctx, -8, 12, 16, 8, "#0a0a18");
+  }
+
+  function drawBossAbyss(ctx, frame) {
+    const tent = Math.sin(frame * 0.16) * 2;
+    fillPix(ctx, -16, -10, 32, 18, "#280838");
+    fillPix(ctx, -12, -22, 24, 14, "#501070");
+    fillPix(ctx, -8, -16, 16, 8, "#8020a8");
+    fillPix(ctx, -20 - tent, 2, 8, 14, "#380850");
+    fillPix(ctx, 12 + tent, 2, 8, 14, "#380850");
+    fillPix(ctx, -24, 8, 6, 12, "#180428");
+    fillPix(ctx, 18, 8, 6, 12, "#180428");
+    fillPix(ctx, -4, -8, 8, 6, "#ff40a0");
+    fillPix(ctx, -10, -30, 20, 4, "#e040c0");
+  }
+
+  function drawBossBody(ctx, variant, frame) {
+    const v = variant % 5;
+    if (v === 0) drawBossDemon(ctx, frame);
+    else if (v === 1) drawBossGolem(ctx, frame);
+    else if (v === 2) drawBossShrine(ctx, frame);
+    else if (v === 3) drawBossShadow(ctx, frame);
+    else drawBossAbyss(ctx, frame);
+  }
+
+  function drawBat(ctx, frame) {
+    const wing = Math.sin(frame * 0.35) * 5;
+    fillPix(ctx, -4, -2, 8, 6, "#4a3858");
+    fillPix(ctx, -10 - wing, -8, 10, 6, "#685878");
+    fillPix(ctx, 2 + wing, -8, 10, 6, "#685878");
+    fillPix(ctx, -3, -6, 6, 4, "#887898");
+    fillPix(ctx, -2, -4, 2, 2, "#ff6060");
+    fillPix(ctx, 1, -4, 2, 2, "#ff6060");
+  }
+
+  function drawSkeleton(ctx, frame) {
+    const bob = Math.sin(frame * 0.2) > 0 ? 0 : 1;
+    fillPix(ctx, -6, -2 + bob, 12, 14, "#d8d8e8");
+    fillPix(ctx, -5, -12 + bob, 10, 8, "#f0f0f8");
+    fillPix(ctx, -4, -10 + bob, 3, 3, "#202028");
+    fillPix(ctx, 1, -10 + bob, 3, 3, "#202028");
+    fillPix(ctx, -8, 0 + bob, 3, 10, "#c0c0d0");
+    fillPix(ctx, 5, 0 + bob, 3, 10, "#c0c0d0");
+    fillPix(ctx, -3, 4 + bob, 6, 8, "#b0b0c0");
+    fillPix(ctx, 8, -2 + bob, 12, 3, "#a0a0b0");
+  }
+
+  function drawSpider(ctx, frame) {
+    const leg = Math.sin(frame * 0.3) * 2;
+    fillPix(ctx, -8, -4, 16, 10, "#2a1810");
+    fillPix(ctx, -6, -10, 12, 8, "#4a2820");
+    fillPix(ctx, -3, -8, 6, 4, "#c03030");
+    fillPix(ctx, -12, 0 + leg, 5, 4, "#3a2018");
+    fillPix(ctx, 7, 0 - leg, 5, 4, "#3a2018");
+    fillPix(ctx, -10, 4 - leg, 4, 5, "#3a2018");
+    fillPix(ctx, 6, 4 + leg, 4, 5, "#3a2018");
+    fillPix(ctx, -2, -2, 4, 3, "#ff4040");
+  }
+
+  function drawOrc(ctx, frame) {
+    const bob = Math.sin(frame * 0.15) > 0 ? 0 : 1;
+    fillPix(ctx, -10, -2 + bob, 20, 16, "#3a5828");
+    fillPix(ctx, -8, -14 + bob, 16, 10, "#6a8850");
+    fillPix(ctx, -6, -10 + bob, 4, 3, "#ffe040");
+    fillPix(ctx, 2, -10 + bob, 4, 3, "#ffe040");
+    fillPix(ctx, -12, 0 + bob, 5, 12, "#4a7038");
+    fillPix(ctx, 7, 0 + bob, 5, 12, "#4a7038");
+    fillPix(ctx, 10, -6 + bob, 14, 4, "#8a6040");
+    fillPix(ctx, -4, -16 + bob, 8, 4, "#2a3820");
+  }
+
   function drawGargoyle(ctx, frame) {
     const wing = Math.sin(frame * 0.12) * 3;
     fillPix(ctx, -18 - wing, -6, 8, 14, "#686878");
@@ -231,20 +481,144 @@
     if (kind === "slime") drawSlime(ctx, frame);
     else if (kind === "goblin") drawGoblin(ctx, frame);
     else if (kind === "wolf") drawWolf(ctx, frame);
+    else if (kind === "bat") drawBat(ctx, frame);
+    else if (kind === "skeleton") drawSkeleton(ctx, frame);
+    else if (kind === "spider") drawSpider(ctx, frame);
+    else if (kind === "orc") drawOrc(ctx, frame);
     else drawGargoyle(ctx, frame);
   }
 
-  function drawMonsterSprite(ctx, tx, ty, m, frame) {
+  function drawMapPickup(ctx, tx, ty, pickup, frame, catalog) {
     const cx = tx * TILE + TILE / 2;
     const cy = ty * TILE + TILE / 2;
+    const bob = Math.sin(frame * 0.18 + (pickup.id || 0)) * 3;
+    const meta = catalog?.[pickup.itemName] || { color: "#e8c040", icon: "?" };
+    ctx.save();
+    ctx.translate(cx, cy + bob);
+    ctx.fillStyle = "rgba(255, 220, 120, 0.35)";
+    ctx.beginPath();
+    ctx.ellipse(0, 2, 14, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    fillPix(ctx, -9, -4, 18, 11, "#7a5028");
+    fillPix(ctx, -9, -7, 18, 4, "#a07038");
+    fillPix(ctx, -7, -5, 14, 2, "#c09050");
+    fillPix(ctx, -4, -2, 8, 5, meta.color || "#6a88e8");
+    ctx.fillStyle = "#fff8e0";
+    ctx.font = "bold 11px system-ui,sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(meta.icon || "?", 0, 2);
+    ctx.restore();
+  }
+
+  function drawMonsterSprite(ctx, tx, ty, m, frame, monsterAttackFx) {
+    const cx = tx * TILE + TILE / 2;
+    const cy = ty * TILE + TILE / 2;
+    const boss = !!(m.isBoss);
+    const attacking = monsterAttackFx && monsterAttackFx.monsterId === m.id && monsterAttackFx.ttl > 0;
+    let lungeX = 0;
+    let lungeY = 0;
+    if (attacking) {
+      const t = 1 - monsterAttackFx.ttl / 18;
+      const peak = t < 0.45 ? t / 0.45 : (1 - t) / 0.55;
+      lungeX = (monsterAttackFx.toX - m.x) * TILE * 0.42 * peak;
+      lungeY = (monsterAttackFx.toY - m.y) * TILE * 0.42 * peak;
+    }
+    ctx.save();
+    ctx.translate(cx + lungeX, cy + lungeY);
+    if (attacking) {
+      ctx.fillStyle = "rgba(255, 60, 40, 0.35)";
+      ctx.beginPath();
+      ctx.arc(0, 0, 18, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (boss) {
+      drawBossAura(ctx, frame + (m.id || 0));
+      ctx.scale(1.95, 1.95);
+      fillPix(ctx, -16, -34, 32, 7, "#2a1808");
+      fillPix(ctx, -14, -32, 28, 3, "#ffd040");
+      fillPix(ctx, -12, -36, 24, 3, "#ff9040");
+    }
+    drawEntityShadow(ctx, 0, 0, boss ? 20 : 12, boss ? 7 : 4);
+    if (boss) drawBossBody(ctx, m.bossVariant ?? 0, frame + m.id * 2);
+    else drawMonsterBody(ctx, m.typeIndex, frame + m.id);
+    const w = boss ? 34 : 22;
+    const barY = boss ? -38 : -22;
+    const hpPct = m.maxHp > 0 ? Math.max(0, m.hp / m.maxHp) : 0;
+    fillPix(ctx, -w / 2, barY, w, 5, "#1a1010");
+    fillPix(ctx, -w / 2, barY, w * hpPct, 5, boss ? "#ffd050" : "#e85040");
+    if (boss) {
+      fillPix(ctx, -w / 2, barY - 6, w, 4, "#4a2808");
+      fillPix(ctx, -w / 2 + 2, barY - 5, Math.max(4, w - 4), 2, "#ffcc66");
+    }
+    ctx.restore();
+  }
+
+  function drawCombatFx(ctx, fx, animFrame) {
+    if (!fx || fx.ttl <= 0) return;
+    const t = fx.ttl / 16;
+    const x0 = fx.fromX * TILE + TILE / 2;
+    const y0 = fx.fromY * TILE + TILE / 2;
+    const x1 = fx.toX * TILE + TILE / 2;
+    const y1 = fx.toY * TILE + TILE / 2;
+    const prog = 1 - t;
+    const cx = x0 + (x1 - x0) * prog;
+    const cy = y0 + (y1 - y0) * prog;
+    const kind = fx.kind || "slash";
+    const col = fx.color || "#fff";
+
+    if (kind === "buff" || kind === "heal") {
+      ctx.save();
+      ctx.translate(x0, y0);
+      ctx.globalAlpha = 0.5 + prog * 0.4;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, 14 + (1 - prog) * 10, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
+    if (kind === "fireball" || kind === "bolt" || kind === "knife" || kind === "holy" || kind === "frost" || kind === "poison") {
+      ctx.save();
+      ctx.translate(cx, cy);
+      const r = kind === "fireball" ? 10 : kind === "frost" ? 14 : 6;
+      ctx.fillStyle = col;
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      if (kind === "frost") {
+        ctx.strokeStyle = "#e8ffff";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, 18 + prog * 6, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+      if (prog > 0.2) {
+        ctx.strokeStyle = col;
+        ctx.globalAlpha = 0.35;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(cx, cy);
+        ctx.stroke();
+      }
+      return;
+    }
+
     ctx.save();
     ctx.translate(cx, cy);
-    drawEntityShadow(ctx, 0, 0, 12, 4);
-    drawMonsterBody(ctx, m.typeIndex, frame + m.id);
-    const w = 22;
-    const hpPct = m.maxHp > 0 ? Math.max(0, m.hp / m.maxHp) : 0;
-    fillPix(ctx, -w / 2, -22, w, 4, "#1a1010");
-    fillPix(ctx, -w / 2, -22, w * hpPct, 4, "#e85040");
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 4;
+    ctx.globalAlpha = 0.7 + prog * 0.3;
+    ctx.beginPath();
+    ctx.moveTo(-12, -8);
+    ctx.lineTo(12, 8);
+    ctx.moveTo(-8, 10);
+    ctx.lineTo(10, -10);
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -332,7 +706,56 @@
     return true;
   }
 
-  function renderWorld(canvas, tiles, mapX, mapY, monsters, animFrame, facing, heroJobId) {
+  function drawMonsterAttackFx(ctx, fx, animFrame) {
+    if (!fx || fx.ttl <= 0) return;
+    const t = 1 - fx.ttl / 18;
+    const x0 = fx.fromX * TILE + TILE / 2;
+    const y0 = fx.fromY * TILE + TILE / 2;
+    const x1 = fx.toX * TILE + TILE / 2;
+    const y1 = fx.toY * TILE + TILE / 2;
+    const mx = x0 + (x1 - x0) * Math.min(1, t * 1.2);
+    const my = y0 + (y1 - y0) * Math.min(1, t * 1.2);
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 80, 50, 0.85)";
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(mx, my);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(255, 200, 120, 0.9)";
+    ctx.lineWidth = 2;
+    const slash = 12 + t * 8;
+    ctx.beginPath();
+    ctx.moveTo(mx - slash, my - slash * 0.6);
+    ctx.lineTo(mx + slash * 0.7, my + slash * 0.5);
+    ctx.moveTo(mx - slash * 0.5, my + slash * 0.4);
+    ctx.lineTo(mx + slash, my - slash * 0.5);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255, 40, 30, 0.55)";
+    ctx.beginPath();
+    ctx.arc(mx, my, 8 + t * 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function renderWorld(
+    canvas,
+    tiles,
+    mapX,
+    mapY,
+    monsters,
+    animFrame,
+    facing,
+    heroJobId,
+    combatFx,
+    monsterAttackFx,
+    pickups,
+    itemCatalog
+  ) {
     if (!canvas || !prepareCanvas(canvas)) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -348,7 +771,7 @@
       ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = "#e8ecff";
       ctx.font = "bold 14px system-ui,sans-serif";
-      ctx.fillText("Map loading…", 24, 48);
+      ctx.fillText("地圖載入中…", 24, 48);
       return;
     }
 
@@ -361,19 +784,26 @@
       }
     }
 
+    for (const pk of pickups || []) {
+      drawMapPickup(ctx, pk.x, pk.y, pk, animFrame, itemCatalog);
+    }
+
     const sorted = [...(monsters || [])].sort((a, b) => a.y - b.y || a.x - b.x);
     for (const m of sorted) {
       if (m.y === my && m.x === mx) continue;
-      drawMonsterSprite(ctx, m.x, m.y, m, animFrame);
+      drawMonsterSprite(ctx, m.x, m.y, m, animFrame, monsterAttackFx);
     }
 
     drawHeroSprite(ctx, mx, my, animFrame, facing || "down", heroJobId);
 
     for (const m of monsters || []) {
       if (m.x === mx && m.y === my) {
-        drawMonsterSprite(ctx, m.x, m.y, m, animFrame);
+        drawMonsterSprite(ctx, m.x, m.y, m, animFrame, monsterAttackFx);
       }
     }
+
+    if (combatFx) drawCombatFx(ctx, combatFx, animFrame);
+    if (monsterAttackFx) drawMonsterAttackFx(ctx, monsterAttackFx, animFrame);
 
     applyHd2dLighting(ctx, w, h, mx, my);
 
@@ -391,6 +821,8 @@
     JOBS,
     MONSTER_KINDS,
     buildFixedMap,
+    getMapCenter,
+    MAP_CENTER,
     isWalkable,
     getJob,
     prepareCanvas,

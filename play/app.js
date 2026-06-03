@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const STORAGE_KEY = "rpg-engine-browser-v5";
+const STORAGE_KEY = "rpg-engine-browser-v8";
 
 let game = null;
 let animFrame = 0;
@@ -39,17 +39,22 @@ function jobLabel(jobId) {
   const s = storyFor(jobId);
   if (s) return `${s.name} · ${s.className}`;
   const j = WorldView?.getJob?.(jobId);
-  return j?.name || "Hero";
+  return j?.name || "英雄";
 }
 
 function classifyFx(msg) {
   if (!msg || !String(msg).trim()) return null;
-  const m = String(msg).toLowerCase();
-  if (m.includes("game over")) return { icon: "💀", cls: "fx-warn" };
-  if (m.includes("victory") || m.includes("quest:")) return { icon: "✨", cls: "fx-win" };
-  if (m.includes(" hit ") || m.includes("attack ")) return { icon: "💥", cls: "fx-hit" };
-  if (m.includes("no target") || m.includes("blocked")) return { icon: "🚫", cls: "fx-warn" };
-  if (m.includes("level")) return { icon: "⬆️", cls: "fx-lvl" };
+  const m = String(msg);
+  if (m.includes("遊戲結束")) return { icon: "💀", cls: "fx-warn" };
+  if (m.includes("任務完成") || m.includes("首領擊敗") || m.includes("掉落") || m.includes("擊敗")) return { icon: "✨", cls: "fx-win" };
+  if (m.includes("使用道具") || m.includes("自癒")) return { icon: "💚", cls: "fx-heal" };
+  if (m.includes("傷害") || m.includes("暴擊") || m.includes("重劈") || m.includes("火球") || m.includes("聖擊") || m.includes("暗襲")) return { icon: "💥", cls: "fx-hit" };
+  if (m.includes("沒有目標") || m.includes("無法") || m.includes("魔力不足")) return { icon: "🚫", cls: "fx-warn" };
+  if (m.includes("升級")) return { icon: "⬆️", cls: "fx-lvl" };
+  if (m.includes("獲得")) return { icon: "🎁", cls: "fx-win" };
+  if (m.includes("反擊")) return { icon: "💢", cls: "fx-hit" };
+  if (m.includes("首領出現") || m.includes("關：") || m.includes("盾牆") || m.includes("治療術")) return { icon: "👹", cls: "fx-win" };
+  if (m.includes("火球") || m.includes("冰霜") || m.includes("飛刀")) return { icon: "🔥", cls: "fx-hit" };
   return { icon: "✦", cls: "fx-neutral" };
 }
 
@@ -77,30 +82,63 @@ function spawnFx(message, anchorEl) {
   }
 }
 
-function heroStatsHtml(p) {
+function heroStatsHtml(p, view) {
   const hpp = pct(p.hp, p.max_hp);
   const mpp = pct(p.mp, p.max_mp);
+  const atkName = view?.attack_name || "";
+  const atkDesc = view?.attack_desc || "";
+  const rangeLabel =
+    view?.attack_range_type === "ranged"
+      ? `遠程 ${view.attack_range || 3} 格`
+      : "近戰";
+  const stageLine = view
+    ? view.boss_active
+      ? `第 ${view.stage} 關 · 首領戰`
+      : `第 ${view.stage} 關 · 剩 ${view.normals_left ?? "?"} 隻`
+    : "";
   return `
     <p class="hero-class-tag">${jobLabel(p.job_id)}</p>
-    <p class="hero-lv">Lv <b>${p.level}</b></p>
+    ${stageLine ? `<p class="hero-stage">${stageLine}</p>` : ""}
+    <p class="hero-lv">等級 <b>${p.level}</b></p>
+    ${atkName ? `<p class="hero-skill" title="${atkDesc}">普攻：<b>${atkName}</b> <span class="range-tag">${rangeLabel}</span></p>` : ""}
+    ${renderSkillBarHtml(view)}
     <div class="vitals">
-      <span class="bar-tag">HP</span>
+      <span class="bar-tag">生命</span>
       <div class="mega-bar hp"><div class="mega-fill" style="width:${hpp}%"></div></div>
-      <span class="bar-tag">MP</span>
+      <span class="bar-tag">魔力</span>
       <div class="mega-bar mp"><div class="mega-fill" style="width:${mpp}%"></div></div>
     </div>
     <div class="mic-stats">
-      <span>ATK <b>${p.atk}</b></span>
-      <span>DEF <b>${p.def}</b></span>
-      <span>EXP <b>${p.exp}</b></span>
+      <span>攻擊 <b>${p.atk}</b></span>
+      <span>防禦 <b>${p.def}</b></span>
+      <span>經驗 <b>${p.exp}</b></span>
     </div>`;
 }
 
-function heroCardHtml(p) {
+function renderSkillBarHtml(view) {
+  const skills = view?.skills || [];
+  if (!skills.length) return "";
+  const p = view.players?.[0];
+  const mp = p?.mp ?? 0;
+  return `<div class="skill-bar">${skills
+    .map(
+      (sk) => {
+        const ok = mp >= (sk.mp_cost || 0);
+        return `<button type="button" class="skill-btn ${ok ? "" : "disabled"}" data-skill="${sk.index}" title="${sk.desc || ""}">
+          <span class="skill-key">${sk.key}</span>
+          <span class="skill-label">${sk.name}</span>
+          <span class="skill-mp">${sk.mp_cost ? sk.mp_cost + " MP" : "—"}</span>
+        </button>`;
+      }
+    )
+    .join("")}</div>`;
+}
+
+function heroCardHtml(p, view) {
   return `
     <article class="portrait-card hero-card-single">
       <canvas class="hero-portrait-sm" data-job="${p.job_id || "warrior"}" width="72" height="72"></canvas>
-      ${heroStatsHtml(p)}
+      ${heroStatsHtml(p, view)}
     </article>`;
 }
 
@@ -116,9 +154,15 @@ function updateSetupStory(jobId) {
   const s = storyFor(jobId);
   const title = $("setup-story-title");
   const intro = $("setup-story-intro");
-  if (title) title.textContent = s?.title || "Adventure";
+  if (title) title.textContent = s?.title || "冒險";
   if (intro) intro.textContent = s?.intro || "";
   document.querySelectorAll(".class-pick").forEach((btn) => {
+    const job = btn.getAttribute("data-job");
+    const st = storyFor(job);
+    const cn = btn.querySelector(".class-name");
+    const hn = btn.querySelector(".class-hero-name");
+    if (cn && st?.className) cn.textContent = st.className;
+    if (hn && st?.name) hn.textContent = st.name;
     const canvas = btn.querySelector(".class-preview");
     if (canvas) {
       canvas.setAttribute("data-job", btn.getAttribute("data-job"));
@@ -143,26 +187,111 @@ function renderParty(view) {
     el.innerHTML = "";
     return;
   }
-  el.innerHTML = heroCardHtml(p);
+  el.innerHTML = heroCardHtml(p, view);
   paintHeroPortraits(el);
+  el.querySelectorAll(".skill-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.getAttribute("data-skill"));
+      if (!Number.isNaN(idx)) useSkill(idx);
+    });
+  });
+}
+
+function renderMapHint(view) {
+  const el = $("map-hint");
+  if (!el || !view) return;
+  const phase = view.boss_active ? "首領戰" : `小怪 ${view.normals_left ?? 0} 隻`;
+  el.textContent = `第 ${view.stage} 關 · ${phase} · 踩道具箱拾取 · WASD 移動 · 空白鍵普攻 · 1/2 技能`;
+}
+
+function itemMeta(name) {
+  return window.ItemCatalog?.[name] || { label: name, desc: "", color: "#5a7a9a", icon: "?" };
 }
 
 function renderQuests(view) {
   const el = $("quest-list");
+  const banner = $("quest-complete-banner");
+  if (banner) {
+    banner.classList.toggle("hidden", !view.all_quests_done);
+  }
+  if (!view.quests?.length) {
+    el.innerHTML = `<p class="quest-empty">目前沒有進行中的任務。</p>`;
+    return;
+  }
   el.innerHTML = view.quests
     .map((q) => {
       const pc = pct(q.progress, q.target);
       const done = q.done ? "done" : "";
-      return `<div class="quest-sigil ${done}">
+      const active = q.active ? "active" : "";
+      const locked = q.locked ? "locked" : "";
+      const status = q.active ? "進行中" : q.locked ? "未解鎖" : done ? "可領取" : "等待中";
+      return `<div class="quest-sigil ${done} ${active} ${locked}">
         <div class="quest-shine" style="width:${pc}%"></div>
-        <span class="q-title">${q.title || "Quest"}</span>
-        <p class="q-desc">${q.desc || ""}</p>
-        <div class="q-ring" style="background:conic-gradient(#d4b66a ${pc}%, rgba(255,255,255,0.06) 0)">
-          <span class="q-ring-inner">${q.progress}<span class="q-slash">/</span>${q.target}</span>
+        <div class="quest-body">
+          <span class="q-badge">${status}</span>
+          <span class="q-title">${q.title || "任務"}</span>
+          <p class="q-desc">${q.desc || ""}</p>
+          <p class="q-reward">獎勵：${q.reward_text || "—"}</p>
+          <div class="q-progress-row">
+            <div class="q-bar"><div class="q-bar-fill" style="width:${pc}%"></div></div>
+            <span class="q-count">${q.progress} / ${q.target}</span>
+          </div>
         </div>
       </div>`;
     })
     .join("");
+}
+
+function renderBag(view) {
+  const list = $("bag-list");
+  const empty = $("bag-empty");
+  const p = view.players[0];
+  const items = p?.inventory || [];
+  if (!items.length) {
+    if (list) list.innerHTML = "";
+    empty?.classList.remove("hidden");
+    return;
+  }
+  empty?.classList.add("hidden");
+  list.innerHTML = items
+    .map((it) => {
+      const meta = itemMeta(it.name);
+      const effect =
+        it.heal > 0 && it.mp > 0
+          ? `+${it.heal} 生命、+${it.mp} 魔力`
+          : it.heal > 0
+            ? `+${it.heal} 生命`
+            : it.mp > 0
+              ? `+${it.mp} 魔力`
+              : meta.desc;
+      return `<button type="button" class="bag-slot" data-item-slot="${it.slot}" title="${meta.desc || effect}">
+        <span class="bag-icon" style="--item-color:${meta.color}">${meta.icon}</span>
+        <span class="bag-name">${meta.label || it.name}</span>
+        <span class="bag-effect">${effect}</span>
+        <span class="bag-qty">×${it.quantity}</span>
+      </button>`;
+    })
+    .join("");
+  list.querySelectorAll(".bag-slot").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const slot = Number(btn.getAttribute("data-item-slot"));
+      if (!Number.isNaN(slot)) useItem(slot);
+    });
+  });
+}
+
+function useItem(slot) {
+  if (!game || resetPending) return;
+  run("use", slot);
+}
+
+function setSidebarTab(tab) {
+  const quests = tab === "quests";
+  $("panel-quests")?.classList.toggle("hidden", !quests);
+  $("panel-bag")?.classList.toggle("hidden", quests);
+  document.querySelectorAll(".pill-tab").forEach((b) => {
+    b.classList.toggle("on", b.getAttribute("data-tab") === tab);
+  });
 }
 
 function heroJobId(view) {
@@ -179,7 +308,9 @@ function rebuildWorld() {
   const seed = game.rngSeed >>> 0 || 1;
   game.worldTiles = WorldView.buildFixedMap(seed);
   game.mapMonsters = [];
+  game.mapPickups = [];
   game.nextMonsterId = 1;
+  game.nextPickupId = 1;
   game.mapX = 1;
   game.mapY = 1;
   game.inBattle = 0;
@@ -210,12 +341,38 @@ function renderWorldView(view) {
   const mx = game.mapX ?? 1;
   const my = game.mapY ?? 1;
   try {
-    WorldView.renderWorld(c, tiles, mx, my, monsters, animFrame, facing, heroJobId(view));
+    WorldView.renderWorld(
+      c,
+      tiles,
+      mx,
+      my,
+      monsters,
+      animFrame,
+      facing,
+      heroJobId(view),
+      game.combatFx,
+      game.monsterAttackFx,
+      game.mapPickups,
+      window.ItemCatalog
+    );
   } catch (err) {
     console.error("Map render error:", err);
     rebuildWorld();
     try {
-      WorldView.renderWorld(c, game.worldTiles, game.mapX, game.mapY, game.mapMonsters, animFrame, facing, heroJobId(view));
+      WorldView.renderWorld(
+        c,
+        game.worldTiles,
+        game.mapX,
+        game.mapY,
+        game.mapMonsters,
+        animFrame,
+        facing,
+        heroJobId(view),
+        game.combatFx,
+        game.monsterAttackFx,
+        game.mapPickups,
+        window.ItemCatalog
+      );
     } catch (e2) {
       const ctx = c.getContext("2d");
       if (ctx && c.width > 0) {
@@ -223,7 +380,7 @@ function renderWorldView(view) {
         ctx.fillRect(0, 0, c.width, c.height);
         ctx.fillStyle = "#fff";
         ctx.font = "14px sans-serif";
-        ctx.fillText("Map error — press Restart", 40, 80);
+        ctx.fillText("地圖錯誤 — 請按重新開始", 40, 80);
       }
     }
   }
@@ -241,6 +398,8 @@ function renderView(view, fxMsg) {
   renderStory(view);
   renderParty(view);
   renderQuests(view);
+  renderBag(view);
+  renderMapHint(view);
   renderWorldView(view);
   if (fxMsg) spawnFx(fxMsg, $("world-canvas"));
 }
@@ -250,6 +409,8 @@ function startAnimLoop() {
   const tick = () => {
     animFrame++;
     if (game && $("game") && !$("game").classList.contains("hidden")) {
+      if (game.combatFx && RPG.tickCombatFx) RPG.tickCombatFx(game);
+      if (game.monsterAttackFx && RPG.tickMonsterAttackFx) RPG.tickMonsterAttackFx(game);
       const view = RPG.toView(game);
       renderWorldView(view);
       paintHeroPortraits($("party-list"));
@@ -280,11 +441,11 @@ function moveHero(dx, dy) {
   const ny = game.mapY + dy;
   const tiles = game.worldTiles;
   if (!tilesOk(tiles) || !WorldView.isWalkable(tiles, nx, ny)) {
-    spawnFx("Blocked", $("world-canvas"));
+    spawnFx("無法通過", $("world-canvas"));
     return;
   }
   if (RPG.monsterAt(game, nx, ny)) {
-    spawnFx("Blocked", $("world-canvas"));
+    spawnFx("無法通過", $("world-canvas"));
     return;
   }
   if (dx < 0) facing = "left";
@@ -293,9 +454,11 @@ function moveHero(dx, dy) {
   else if (dy > 0) facing = "down";
   game.mapX = nx;
   game.mapY = ny;
-  game.message = "";
+  game.facing = facing;
+  const collected = RPG.tryCollectPickup(game);
+  if (!collected) game.message = "";
   saveState(game);
-  renderView(RPG.toView(game));
+  renderView(RPG.toView(game), collected ? game.message : null);
 }
 
 function goToHome() {
@@ -309,6 +472,7 @@ function restartGame() {
   resetPending = false;
   localStorage.removeItem(STORAGE_KEY);
   game = RPG.newGame({ jobId: selectedJobId() });
+  game.facing = facing;
   syncMapFromEngine();
   saveState(game);
   $("game").classList.remove("hidden");
@@ -320,7 +484,7 @@ function restartGame() {
 function scheduleResetAfterDeath() {
   if (resetPending) return;
   resetPending = true;
-  spawnFx("Game Over", $("world-canvas"));
+  spawnFx("遊戲結束", $("world-canvas"));
   setTimeout(() => restartGame(), 900);
 }
 
@@ -338,7 +502,14 @@ function run(cmd, arg) {
 
 function mapAttack() {
   if (!game || resetPending) return;
+  game.facing = facing;
   run("attack");
+}
+
+function useSkill(index) {
+  if (!game || resetPending) return;
+  game.facing = facing;
+  run("skill", index);
 }
 
 $("class-grid").addEventListener("click", (e) => {
@@ -352,6 +523,7 @@ $("class-grid").addEventListener("click", (e) => {
 $("btnNew").addEventListener("click", () => {
   resetPending = false;
   game = RPG.newGame({ jobId: selectedJobId() });
+  game.facing = facing;
   syncMapFromEngine();
   ensureWorld();
   saveState(game);
@@ -363,8 +535,9 @@ $("btnNew").addEventListener("click", () => {
 
 $("btnResume").addEventListener("click", () => {
   game = loadState();
+  if (game) game.facing = game.facing || facing;
   if (!game) {
-    spawnFx("No save");
+    spawnFx("沒有存檔");
     return;
   }
   resetPending = false;
@@ -378,7 +551,7 @@ $("btnResume").addEventListener("click", () => {
 
 $("btnClearSave").addEventListener("click", () => {
   localStorage.removeItem(STORAGE_KEY);
-  spawnFx("Cleared", $("btnClearSave"));
+  spawnFx("已清除存檔", $("btnClearSave"));
 });
 
 $("btn-home").addEventListener("click", () => {
@@ -388,16 +561,8 @@ $("btn-home").addEventListener("click", () => {
 
 $("btn-restart").addEventListener("click", () => restartGame());
 
-$("btn-map-atk").addEventListener("click", () => mapAttack());
-
-$("dpad").addEventListener("click", (e) => {
-  const btn = e.target.closest(".dpad-btn");
-  if (!btn || !game) return;
-  const dir = btn.getAttribute("data-dir");
-  const map = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
-  const d = map[dir];
-  if (d) moveHero(d[0], d[1]);
-});
+$("tab-quests")?.addEventListener("click", () => setSidebarTab("quests"));
+$("tab-bag")?.addEventListener("click", () => setSidebarTab("bag"));
 
 document.addEventListener("keydown", (e) => {
   if (!$("game") || $("game").classList.contains("hidden") || !game || resetPending) return;
@@ -414,6 +579,26 @@ document.addEventListener("keydown", (e) => {
   if (e.code === "Space" || e.key === "j" || e.key === "J") {
     e.preventDefault();
     mapAttack();
+    return;
+  }
+  if (e.code === "Digit1" || e.key === "1") {
+    e.preventDefault();
+    useSkill(0);
+    return;
+  }
+  if (e.code === "Digit2" || e.key === "2") {
+    e.preventDefault();
+    useSkill(1);
+    return;
+  }
+  if (e.key === "b" || e.key === "B") {
+    e.preventDefault();
+    setSidebarTab("bag");
+    return;
+  }
+  if (e.key === "q" || e.key === "Q") {
+    e.preventDefault();
+    setSidebarTab("quests");
     return;
   }
   const d = keys[e.code];
