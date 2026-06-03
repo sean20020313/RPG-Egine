@@ -6,7 +6,7 @@
 
 ## 專案介紹
 
-瀏覽器開啟 **`play/index.html`**（或經本機簡易 HTTP 伺服器）即可遊玩圖形介面版：邏輯在 `play/engine.js`，與 `src/` C 版規則對齊。**本機後端**：Flask 呼叫 `build/rpg_engine`；`static/` 為舊版表單式前端，可改指向 `play/`。
+瀏覽器經本機 **HTTP 伺服器**（需先安裝 **Python 3**）開啟 **`play/`** 即可遊玩圖形介面版；邏輯在 `play/engine.js`，與 `src/` C 版規則對齊。**本機後端**：Flask 亦需 Python，呼叫 `build/rpg_engine`；`static/` 為舊版表單式前端，可改指向 `play/`。
 
 ---
 
@@ -132,8 +132,10 @@ flowchart TB
 |------|--------|---------|
 | 作業系統 | macOS 11+（建議 12+） | Windows 10 / 11（64 位元） |
 | 瀏覽器 | Safari、Chrome、Edge、Firefox 近期版 | Chrome、Edge、Firefox 近期版 |
-| 其它 | 無需安裝 C / Python | 無需安裝 C / Python |
-| 可選 | 見下方「本機開啟網址」 | 同上，或安裝 [Python](https://www.python.org/downloads/) 勾選「Add to PATH」 |
+| **Python 3** | **必裝**（見下方安裝說明） | **必裝**（安裝時勾選 **Add python.exe to PATH**） |
+| 其它 | 無需安裝 C / Flask | 無需安裝 C / Flask |
+
+使用 `python3 -m http.server` 啟動本機伺服器時，系統必須已安裝 Python；若終端出現 `command not found: python3` 或 `'python3' 不是內部或外部命令`，請先完成安裝再執行下方指令。
 
 進度存在瀏覽器 **localStorage**；換電腦或清除網站資料會消失。
 
@@ -277,9 +279,22 @@ play/assets/
 
 ### 瀏覽器圖形版（`play/`，免編譯）
 
-1. 雙擊 **`play/index.html`**，或用本機 HTTP 伺服器（見下表）。
-2. 進度儲存在瀏覽器 **localStorage**。
-3. 操作方式見上文 **「鍵盤操作（`play/` 圖形版）」**。
+1. **安裝 Python 3**（若尚未安裝，見下一小節）。
+2. 在終端機執行 **`python3 -m http.server`**（見下表），再用瀏覽器開啟對應網址。
+3. 進度儲存在瀏覽器 **localStorage**。
+4. 操作方式見上文 **「鍵盤操作（`play/` 圖形版）」**。
+
+> **為什麼要裝 Python？**  
+> `play/` 內有多個 `.js` 腳本，用 `file://` 直接雙擊 `index.html` 時，部分瀏覽器會擋下載入而導致地圖無法顯示。用 Python 內建的簡易 HTTP 伺服器是最省事、也最穩定的開法。
+
+#### 安裝 Python 3
+
+| 系統 | 安裝方式 | 安裝後確認 |
+|------|----------|------------|
+| **macOS** | [python.org 下載](https://www.python.org/downloads/) 安裝，或終端執行 `brew install python`（需已安裝 [Homebrew](https://brew.sh/)） | `python3 --version` 應顯示 3.10 或以上 |
+| **Windows** | [python.org 下載](https://www.python.org/downloads/) 安裝程式，**務必勾選**「Add python.exe to PATH」 | `py --version` 或 `python --version` |
+
+安裝完成後，在專案資料夾開啟終端機（macOS：終端機；Windows：PowerShell 或「命令提示字元」），再執行下方的 `python3 -m http.server`（Windows 可改為 `py -m http.server`）。
 
 **本機開啟網址（依你在哪個資料夾執行 `python3 -m http.server`）：**
 
@@ -290,29 +305,41 @@ play/assets/
 
 若在 `play/` 裡卻開 `/play/` 會 **404**（伺服器根目錄就是 `play`，沒有再一層 `play` 資料夾）。
 
-**macOS（在 `play/` 內，你目前的情況）：**
+**macOS（在 `play/` 內）：**
 
 ```bash
 cd /path/to/RPG-Egine/play
 python3 -m http.server 8000
-# 開 http://127.0.0.1:8000/
 ```
 
-**macOS（在專案根目錄）：**
+瀏覽器開啟：**http://127.0.0.1:8000/**
+
+**macOS（在專案根目錄 `RPG-Egine/`）：**
 
 ```bash
 cd /path/to/RPG-Egine
 python3 -m http.server 8000
-# 開 http://127.0.0.1:8000/play/
 ```
+
+瀏覽器開啟：**http://127.0.0.1:8000/play/**
 
 **Windows（PowerShell，在 `play` 內）：**
 
 ```powershell
 cd C:\path\to\RPG-Egine\play
 py -m http.server 8000
-# 開 http://127.0.0.1:8000/
 ```
+
+若 `py` 無法使用，可改試 `python -m http.server 8000`。瀏覽器開啟：**http://127.0.0.1:8000/**
+
+**常見問題**
+
+| 狀況 | 處理方式 |
+|------|----------|
+| `python3: command not found`（macOS） | 尚未安裝 Python，請依上方「安裝 Python 3」安裝後重開終端機 |
+| `'python3' 不是內部或外部命令`（Windows） | 改用 `py -m http.server 8000`，或重新安裝 Python 並勾選 **Add to PATH** |
+| 開了 `/play/` 卻 404 | 你是在 `play/` 資料夾內啟動伺服器，應開 **http://127.0.0.1:8000/**，不要多加 `/play/` |
+| 埠 8000 已被占用 | 改用 `python3 -m http.server 8080`，網址改為 `http://127.0.0.1:8080/` |
 
 ---
 
