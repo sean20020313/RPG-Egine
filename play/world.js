@@ -39,8 +39,120 @@
 
   function setBridge(map, x, y) {
     if (!inMap(x, y) || isBossCell(x, y) || isSpawnCell(x, y)) return;
-    if (map[y][x] === T.WALL) return;
     map[y][x] = T.BRIDGE;
+  }
+
+  function isWalkableCell(map, x, y) {
+    if (!inMap(x, y)) return false;
+    const k = map[y][x];
+    return k === T.FLOOR || k === T.PROP || k === T.VILLAGE || k === T.BRIDGE;
+  }
+
+  function bfsPath(map, x0, y0, x1, y1) {
+    if (x0 === x1 && y0 === y1) return true;
+    if (!isWalkableCell(map, x0, y0) || !isWalkableCell(map, x1, y1)) return false;
+    const key = (x, y) => `${x},${y}`;
+    const q = [[x0, y0]];
+    const seen = new Set([key(x0, y0)]);
+    const dirs = [
+      [0, 1],
+      [0, -1],
+      [1, 0],
+      [-1, 0],
+    ];
+    while (q.length) {
+      const [x, y] = q.shift();
+      for (const [dx, dy] of dirs) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (!isWalkableCell(map, nx, ny)) continue;
+        const k = key(nx, ny);
+        if (seen.has(k)) continue;
+        if (nx === x1 && ny === y1) return true;
+        seen.add(k);
+        q.push([nx, ny]);
+      }
+    }
+    return false;
+  }
+
+  function openBarrierCell(map, x, y) {
+    if (!inMap(x, y) || isSpawnCell(x, y)) return;
+    if (isBossCell(x, y)) {
+      map[y][x] = T.FLOOR;
+      return;
+    }
+    if (map[y][x] === T.WATER) map[y][x] = T.BRIDGE;
+    else map[y][x] = T.FLOOR;
+  }
+
+  function openBarrierBetweenRegions(map, mainId) {
+    const regions = labelWalkableRegions(map);
+    const dirs = [
+      [0, 1],
+      [0, -1],
+      [1, 0],
+      [-1, 0],
+    ];
+    for (let y = 1; y < ROWS - 1; y++) {
+      for (let x = 1; x < COLS - 1; x++) {
+        if (!isBlockingTile(map[y][x])) continue;
+        const regs = new Set();
+        for (const [dx, dy] of dirs) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (!isWalkableCell(map, nx, ny)) continue;
+          const r = regions[ny][nx];
+          if (r) regs.add(r);
+        }
+        if (regs.size >= 2 && regs.has(mainId)) {
+          openBarrierCell(map, x, y);
+          return true;
+        }
+      }
+    }
+    for (let y = 1; y < ROWS - 1; y++) {
+      for (let x = 1; x < COLS - 1; x++) {
+        if (!isWalkableCell(map, x, y) || regions[y][x] === mainId) continue;
+        for (const [dx, dy] of dirs) {
+          const bx = x + dx;
+          const by = y + dy;
+          if (!isBlockingTile(map[by][bx])) continue;
+          for (const [dx2, dy2] of dirs) {
+            const nx = bx + dx2;
+            const ny = by + dy2;
+            if (!isWalkableCell(map, nx, ny)) continue;
+            if (regions[ny][nx] === mainId) {
+              openBarrierCell(map, bx, by);
+              return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  function findDisconnectedWalkable(map, mainId) {
+    const regions = labelWalkableRegions(map);
+    for (let y = 1; y < ROWS - 1; y++) {
+      for (let x = 1; x < COLS - 1; x++) {
+        if (isWalkableCell(map, x, y) && regions[y][x] !== mainId) return { x, y };
+      }
+    }
+    return null;
+  }
+
+  function carveWalkPath(map, x0, y0, x1, y1) {
+    let x = x0;
+    let y = y0;
+    let guard = 0;
+    while ((x !== x1 || y !== y1) && guard++ < 64) {
+      if (!isWalkableCell(map, x, y)) openBarrierCell(map, x, y);
+      if (x !== x1) x += x < x1 ? 1 : -1;
+      else y += y < y1 ? 1 : -1;
+    }
+    if (!isWalkableCell(map, x1, y1)) openBarrierCell(map, x1, y1);
   }
 
   function carveRiverH(map, y, x0, x1) {
@@ -108,15 +220,6 @@
       ],
     },
     {
-      theme: "ruins",
-      entries: [
-        { typeIndex: 5, name: "遺跡骷髏" },
-        { typeIndex: 3, name: "斷垣石像" },
-        { typeIndex: 7, name: "遊蕩獸人" },
-        { typeIndex: 11, name: "古代幽靈" },
-      ],
-    },
-    {
       theme: "crystal",
       entries: [
         { typeIndex: 0, name: "晶化史萊姆" },
@@ -169,68 +272,51 @@
     return ids;
   }
 
-  /** 打通孤島，避免障礙物形成無法到達的死路 */
+  /** 打通孤島：所有可走格與起點同區，且起點可走到首領區 */
   function ensureMapConnectivity(map, startX, startY) {
     const sx = Math.max(1, Math.min(COLS - 2, startX | 0));
     const sy = Math.max(1, Math.min(ROWS - 2, startY | 0));
-    if (isBlockingTile(map[sy][sx])) map[sy][sx] = T.FLOOR;
+    if (!isWalkableCell(map, sx, sy)) map[sy][sx] = T.FLOOR;
 
-    const dirs = [
-      [0, 1],
-      [0, -1],
-      [1, 0],
-      [-1, 0],
-    ];
+    const { x: bx, y: by } = MAP_CENTER;
+    clearBossArena(map);
 
-    for (let pass = 0; pass < 96; pass++) {
+    for (let pass = 0; pass < 160; pass++) {
       const regions = labelWalkableRegions(map);
-      const startRegion = regions[sy][sx];
-      let allOk = true;
-      for (let y = 1; y < ROWS - 1 && allOk; y++) {
-        for (let x = 1; x < COLS - 1; x++) {
-          if (!isBlockingTile(map[y][x]) && regions[y][x] !== startRegion) {
-            allOk = false;
-            break;
-          }
-        }
-      }
-      if (allOk) break;
+      const mainId = regions[sy][sx];
 
-      let opened = false;
-      for (let y = 1; y < ROWS - 1 && !opened; y++) {
+      let unified = true;
+      for (let y = 1; y < ROWS - 1 && unified; y++) {
         for (let x = 1; x < COLS - 1; x++) {
-          if (!isBlockingTile(map[y][x])) continue;
-          const regionIds = new Set();
-          for (const [dx, dy] of dirs) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (isBlockingTile(map[ny][nx])) continue;
-            regionIds.add(regions[ny][nx]);
-          }
-          if (regionIds.size >= 2 && regionIds.has(startRegion)) {
-            map[y][x] = T.FLOOR;
-            opened = true;
+          if (isWalkableCell(map, x, y) && regions[y][x] !== mainId) {
+            unified = false;
             break;
           }
         }
       }
-      if (opened) continue;
 
-      for (let y = 1; y < ROWS - 1 && !opened; y++) {
-        for (let x = 1; x < COLS - 1; x++) {
-          if (!isBlockingTile(map[y][x]) || regions[y][x] === startRegion) continue;
-          for (const [dx, dy] of dirs) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (!isBlockingTile(map[ny][nx])) continue;
-            map[ny][nx] = T.FLOOR;
-            opened = true;
-            break;
-          }
-          if (opened) break;
-        }
+      const bossOk = unified && bfsPath(map, sx, sy, bx, by);
+      if (bossOk) {
+        clearBossArena(map);
+        return;
       }
+
+      if (!unified && openBarrierBetweenRegions(map, mainId)) continue;
+
+      const orphan = findDisconnectedWalkable(map, mainId);
+      if (orphan) {
+        carveWalkPath(map, sx, sy, orphan.x, orphan.y);
+        continue;
+      }
+
+      if (!bfsPath(map, sx, sy, bx, by)) {
+        carveWalkPath(map, sx, sy, bx, by);
+        continue;
+      }
+
+      break;
     }
+    clearBossArena(map);
   }
 
   function clearBossArena(map) {
@@ -245,7 +331,7 @@
     }
   }
 
-  const MAX_MAP_STAGES = 5;
+  const MAX_MAP_STAGES = 4;
 
   const MAP_THEMES = [
     {
@@ -297,22 +383,6 @@
       bg: "#301008",
     },
     {
-      id: "ruins",
-      name: "遺跡",
-      wallMod: 10,
-      decorMod: 7,
-      floorA: "#7a7878",
-      floorB: "#686666",
-      floorHi: "#a0a0a8",
-      decorBase: "#484850",
-      wallSide: "#505058",
-      wallTop: "#a8a8b0",
-      wallFront: "#787880",
-      light: "rgba(255, 235, 200, 0.12)",
-      vignette: "rgba(0, 0, 0, 0.35)",
-      bg: "#1c1c24",
-    },
-    {
       id: "crystal",
       name: "水晶",
       wallMod: 12,
@@ -345,7 +415,7 @@
         s = (Math.imul(s, 1103515245) + 12345) >>> 0;
         if (x === 0 || y === 0 || x === COLS - 1 || y === ROWS - 1) row.push(2);
         else if (x <= 2 && y <= 2) row.push(0);
-        else if (s % theme.wallMod === 0) row.push(2);
+        else if (s % (theme.wallMod + 2) === 0) row.push(2);
         else if (s % theme.decorMod === 0) row.push(1);
         else row.push(0);
       }
@@ -1642,6 +1712,7 @@
     getMapCenter,
     MAP_CENTER,
     isWalkable,
+    ensureMapConnectivity,
     getJob,
     prepareCanvas,
     drawHeroPortrait,

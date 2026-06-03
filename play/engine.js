@@ -50,8 +50,9 @@
       themeId: pool.theme,
     };
   }
-  const MAX_STAGES = 5;
-  const BOSS_NAMES = ["草原巨獸", "雪原霸主", "熔岩領主", "遺跡守護者", "水晶龍王"];
+  const MAX_STAGES = 4;
+  const BOSS_NAMES = ["草原巨獸", "雪原霸主", "熔岩領主", "水晶龍王"];
+  const BOSS_TYPE_BY_STAGE = [2, 9, 10, 12];
   const STAGE_MONSTER_COUNT = 8;
 
   /** 各關首領固定掉落（通關獎勵） */
@@ -69,16 +70,27 @@
       { name: "乙醚", qty: 1 },
     ],
     [
-      { name: "強效藥水", qty: 1 },
-      { name: "魔力藥水", qty: 2 },
-      { name: "治療藥水", qty: 1 },
-    ],
-    [
       { name: "強效藥水", qty: 2 },
       { name: "魔力藥水", qty: 2 },
       { name: "乙醚", qty: 1 },
     ],
   ];
+
+  function activePlayer(g) {
+    return g.players?.[g.activePlayer] || g.players?.[0] || null;
+  }
+
+  /** 中等難度：關卡與英雄等級同步成長 */
+  function monsterDifficulty(g) {
+    const stage = Math.min(MAX_STAGES, Math.max(1, g.stage || 1));
+    const lv = activePlayer(g)?.level || 1;
+    return {
+      hpFlat: (stage - 1) * 4 + Math.max(0, lv - 1) * 5,
+      atkFlat: (stage - 1) + Math.floor(Math.max(0, lv - 1) * 0.75),
+      defFlat: Math.floor((stage - 1) * 0.6 + Math.max(0, lv - 1) * 0.5),
+      expFlat: (stage - 1) * 2 + Math.max(0, lv - 1) * 3,
+    };
+  }
 
   function randU32(g) {
     g.rngSeed = (Math.imul(g.rngSeed >>> 0, 1103515245) + 12345) >>> 0;
@@ -391,9 +403,9 @@
       p.exp -= 100;
       p.level++;
       p.maxHp += 5;
-      p.hp = p.maxHp;
       p.maxMp += 3;
-      p.mp = p.maxMp;
+      if (p.hp > p.maxHp) p.hp = p.maxHp;
+      if (p.mp > p.maxMp) p.mp = p.maxMp;
       p.atk += 2;
       p.def += 1;
       g.message = `升級！Lv${p.level}`;
@@ -542,13 +554,14 @@
     if (monsterAt(g, x, y)) return false;
     const stage = g.stage || 1;
     if (!g.nextMonsterId) g.nextMonsterId = 1;
+    const diff = monsterDifficulty(g);
+    const lv = activePlayer(g)?.level || 1;
     if (isBoss) {
       const si = Math.min(MAX_STAGES, Math.max(1, stage)) - 1;
-      const bossTypes = [2, 9, 10, 11, 12];
-      const idx = bossTypes[si] || 3;
+      const idx = BOSS_TYPE_BY_STAGE[si] ?? 3;
       const t = MONSTERS[idx] || MONSTERS[3];
-      let mh = 70 + stage * 28 + randRange(g, -5, 12);
-      if (mh < 40) mh = 40;
+      let mh = 52 + stage * 22 + lv * 8 + diff.hpFlat + randRange(g, -4, 10);
+      if (mh < 45) mh = 45;
       const bname = BOSS_NAMES[si];
       const bossVariant = si;
       const theme = g.mapTheme?.id || global.STAGE_MONSTER_POOLS?.[si]?.theme || "";
@@ -561,17 +574,17 @@
         name: `首領·${bname}`,
         hp: mh,
         maxHp: mh,
-        atk: t.atk + 6 + stage * 2,
-        def: t.def + 3 + Math.floor(stage / 2),
-        exp: 40 + stage * 15,
+        atk: Math.floor(t.atk + 5 + stage * 2 + diff.atkFlat * 1.1),
+        def: Math.floor(t.def + 2 + Math.floor(stage / 2) + diff.defFlat),
+        exp: 38 + stage * 14 + diff.expFlat,
         isBoss: 1,
         bossVariant,
       });
       return true;
     }
     const picked = pickStageMonster(g);
-    let mh = picked.hp + randRange(g, -3, 4) + Math.floor(stage * 0.5);
-    if (mh < 8) mh = 8;
+    let mh = picked.hp + diff.hpFlat + randRange(g, -3, 4);
+    if (mh < 10) mh = 10;
     g.mapMonsters.push({
       id: g.nextMonsterId++,
       x,
@@ -581,9 +594,9 @@
       name: picked.name,
       hp: mh,
       maxHp: mh,
-      atk: picked.atk + Math.floor(stage / 3),
-      def: picked.def,
-      exp: picked.exp + stage * 2,
+      atk: picked.atk + diff.atkFlat,
+      def: picked.def + diff.defFlat,
+      exp: picked.exp + diff.expFlat + stage * 2,
       isBoss: 0,
     });
     return true;
@@ -851,9 +864,9 @@
       p.exp -= 100;
       p.level++;
       p.maxHp += 5;
-      p.hp = p.maxHp;
       p.maxMp += 3;
-      p.mp = p.maxMp;
+      if (p.hp > p.maxHp) p.hp = p.maxHp;
+      if (p.mp > p.maxMp) p.mp = p.maxMp;
       p.atk += 2;
       p.def += 1;
       g.message += " 升級！";
@@ -1001,7 +1014,7 @@
     if (g.players[0] && story?.name) g.players[0].name = story.name;
     const list = story?.quests || [
       { title: "初陣", desc: "通關 2 關", kind: 1, target: 2, rewardExp: 30 },
-      { title: "遠征", desc: "通關 5 關", kind: 1, target: 5, rewardExp: 60 },
+      { title: "遠征", desc: "通關 4 關", kind: 1, target: 4, rewardExp: 60 },
     ];
     let id = 1;
     g.allQuestsDone = 0;
@@ -1380,6 +1393,17 @@
       if (g.mapY < 1) g.mapY = 1;
       if (!g.stage) g.stage = 1;
       spawnStageNormals(g);
+    } else if (WorldView?.ensureMapConnectivity) {
+      WorldView.ensureMapConnectivity(g.worldTiles, 1, 1);
+      if (g.mapX < 1) g.mapX = 1;
+      if (g.mapY < 1) g.mapY = 1;
+      if (!WorldView.isWalkable(g.worldTiles, g.mapX, g.mapY)) {
+        g.mapX = 1;
+        g.mapY = 1;
+      }
+      if (countNormals(g) === 0 && countBosses(g) === 0 && g.stagePhase !== "boss") {
+        spawnBoss(g);
+      }
     } else if (countNormals(g) === 0 && countBosses(g) === 0 && g.stagePhase !== "boss") {
       spawnBoss(g);
     }

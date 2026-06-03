@@ -6,6 +6,7 @@ let animFrame = 0;
 let animId = null;
 let facing = "down";
 let resetPending = false;
+let victoryActive = false;
 
 function storyFor(jobId) {
   return window.HeroStories?.[jobId] || window.HeroStories?.warrior || null;
@@ -46,6 +47,7 @@ function classifyFx(msg) {
   if (!msg || !String(msg).trim()) return null;
   const m = String(msg);
   if (m.includes("遊戲結束")) return { icon: "💀", cls: "fx-warn" };
+  if (m.includes("恭喜通關") || (m.includes("全") && m.includes("關通關"))) return { icon: "🏆", cls: "fx-loot" };
   if (m.includes("首領掉落")) return { icon: "🎁", cls: "fx-loot" };
   if (m.includes("任務完成") || m.includes("首領擊敗") || m.includes("掉落") || m.includes("擊敗")) return { icon: "✨", cls: "fx-win" };
   if (m.includes("使用道具") || m.includes("自癒")) return { icon: "💚", cls: "fx-heal" };
@@ -91,7 +93,7 @@ function heroStatsHtml(p, view) {
     view?.attack_range_type === "ranged"
       ? `遠程 ${view.attack_range || 3} 格`
       : "近戰";
-  const maxS = view?.max_stages || 5;
+  const maxS = view?.max_stages || 4;
   const themeName = view?.map_theme_name ? `【${view.map_theme_name}】` : "";
   const stageLine = view
     ? view.all_stages_clear
@@ -205,7 +207,7 @@ function renderMapHint(view) {
   const el = $("map-hint");
   if (!el || !view) return;
   const theme = view.map_theme_name ? `【${view.map_theme_name}】` : "";
-  const maxS = view.max_stages || 5;
+  const maxS = view.max_stages || 4;
   if (view.all_stages_clear) {
     el.textContent = `全 ${maxS} 關通關！按重新開始再玩一次`;
     return;
@@ -434,6 +436,7 @@ function renderView(view, fxMsg) {
   renderBag(view);
   renderMapHint(view);
   renderWorldView(view);
+  syncVictoryUI(view);
   if (fxMsg) spawnFx(fxMsg, $("world-canvas"));
 }
 
@@ -468,7 +471,7 @@ function syncMapFromEngine() {
 }
 
 function moveHero(dx, dy) {
-  if (!game || resetPending) return;
+  if (!game || resetPending || victoryActive) return;
   ensureWorld();
   syncMapFromEngine();
   const nx = game.mapX + dx;
@@ -494,7 +497,37 @@ function moveHero(dx, dy) {
   renderView(RPG.toView(game));
 }
 
+function hideVictoryScreen() {
+  victoryActive = false;
+  $("victory-overlay")?.classList.add("hidden");
+}
+
+function showVictoryScreen(view) {
+  const ov = $("victory-overlay");
+  if (!ov) return;
+  victoryActive = true;
+  const maxS = view?.max_stages || 4;
+  const p = view?.players?.[0];
+  const sub = $("victory-sub");
+  const hero = $("victory-hero");
+  if (sub) {
+    sub.textContent = `你已通關全部 ${maxS} 關，擊敗最終首領！草原、雪原、熔岩與水晶之地皆已平定。`;
+  }
+  if (hero) {
+    const job = jobLabel(p?.job_id || game?.heroJobId);
+    hero.textContent = p ? `${p.name} · ${job} · Lv${p.level}` : "";
+  }
+  ov.classList.remove("hidden");
+  spawnFx("恭喜通關！", ov);
+}
+
+function syncVictoryUI(view) {
+  if (view?.all_stages_clear) showVictoryScreen(view);
+  else hideVictoryScreen();
+}
+
 function goToHome() {
+  hideVictoryScreen();
   game = null;
   resetPending = false;
   $("game").classList.add("hidden");
@@ -502,6 +535,7 @@ function goToHome() {
 }
 
 function restartGame() {
+  hideVictoryScreen();
   resetPending = false;
   localStorage.removeItem(STORAGE_KEY);
   game = RPG.newGame({ jobId: selectedJobId() });
@@ -522,10 +556,14 @@ function scheduleResetAfterDeath() {
 }
 
 function run(cmd, arg) {
-  if (!game || resetPending) return;
+  if (!game || resetPending || victoryActive) return;
   RPG.applyCommand(game, cmd, arg);
   const view = RPG.toView(game);
   renderView(view, game.message);
+  if (view.all_stages_clear) {
+    saveState(game);
+    return;
+  }
   if (game.gameOver || view.game_over || (view.players[0] && view.players[0].hp <= 0)) {
     scheduleResetAfterDeath();
     return;
@@ -534,13 +572,13 @@ function run(cmd, arg) {
 }
 
 function mapAttack() {
-  if (!game || resetPending) return;
+  if (!game || resetPending || victoryActive) return;
   game.facing = facing;
   run("attack");
 }
 
 function useSkill(index) {
-  if (!game || resetPending) return;
+  if (!game || resetPending || victoryActive) return;
   game.facing = facing;
   run("skill", index);
 }
@@ -564,6 +602,7 @@ $("btnNew").addEventListener("click", () => {
   $("setup").classList.add("hidden");
   paintMapAfterShow();
   startAnimLoop();
+  syncVictoryUI(RPG.toView(game));
 });
 
 $("btnResume").addEventListener("click", () => {
@@ -580,6 +619,7 @@ $("btnResume").addEventListener("click", () => {
   $("setup").classList.add("hidden");
   paintMapAfterShow();
   startAnimLoop();
+  syncVictoryUI(RPG.toView(game));
 });
 
 $("btnClearSave").addEventListener("click", () => {
@@ -594,11 +634,18 @@ $("btn-home").addEventListener("click", () => {
 
 $("btn-restart").addEventListener("click", () => restartGame());
 
+$("btn-victory-home")?.addEventListener("click", () => {
+  if (game) saveState(game);
+  goToHome();
+});
+
+$("btn-victory-restart")?.addEventListener("click", () => restartGame());
+
 $("tab-quests")?.addEventListener("click", () => setSidebarTab("quests"));
 $("tab-bag")?.addEventListener("click", () => setSidebarTab("bag"));
 
 document.addEventListener("keydown", (e) => {
-  if (!$("game") || $("game").classList.contains("hidden") || !game || resetPending) return;
+  if (!$("game") || $("game").classList.contains("hidden") || !game || resetPending || victoryActive) return;
   const keys = {
     ArrowUp: [0, -1],
     ArrowDown: [0, 1],

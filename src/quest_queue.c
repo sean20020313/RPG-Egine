@@ -68,9 +68,9 @@ static void grant_exp(GameState *g, int exp) {
         p->exp -= 100;
         p->level++;
         p->max_hp += 5;
-        p->hp = p->max_hp;
         p->max_mp += 3;
-        p->mp = p->max_mp;
+        if (p->hp > p->max_hp) p->hp = p->max_hp;
+        if (p->mp > p->max_mp) p->mp = p->max_mp;
         p->atk += 2;
         p->def += 1;
         snprintf(g->message, sizeof(g->message), "升級到 Lv%d！", p->level);

@@ -1045,6 +1045,65 @@ body {
 
 .hidden { display: none !important; }
 
+/* 全關通關畫面 */
+.victory-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(4, 6, 14, 0.82);
+  backdrop-filter: blur(10px);
+}
+.victory-panel {
+  width: min(420px, 100%);
+  padding: 32px 28px 26px;
+  text-align: center;
+  border-color: rgba(201, 162, 39, 0.45);
+  box-shadow: 0 0 60px rgba(201, 162, 39, 0.2), 0 24px 80px rgba(0, 0, 0, 0.65);
+  animation: victoryIn 0.45s ease-out;
+}
+@keyframes victoryIn {
+  0% { opacity: 0; transform: scale(0.92) translateY(12px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.victory-crown {
+  margin: 0 0 8px;
+  font-size: 3rem;
+  line-height: 1;
+  filter: drop-shadow(0 0 20px rgba(255, 200, 80, 0.6));
+}
+.victory-title {
+  margin: 0 0 10px;
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #ffe8a0;
+}
+.victory-sub {
+  margin: 0 0 8px;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: rgba(220, 230, 255, 0.88);
+}
+.victory-hero {
+  margin: 0 0 22px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #c9a227;
+  letter-spacing: 0.06em;
+}
+.victory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+.victory-actions .btn-text {
+  min-width: 140px;
+}
+
 /* 角色槽 */
 .hero-slots { display: flex; gap: 10px; flex-wrap: wrap; }
 .slot-pick {

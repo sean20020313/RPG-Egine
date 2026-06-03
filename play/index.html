@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>RPG 冒險</title>
-  <link rel="stylesheet" href="./style.css?v=20" />
+  <link rel="stylesheet" href="./style.css?v=24" />
 </head>
 <body>
   <div class="bg-orbs" aria-hidden="true"></div>
@@ -102,10 +102,23 @@
 
   <div id="fx-layer" class="fx-layer" aria-hidden="true"></div>
 
+  <div id="victory-overlay" class="victory-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="victory-title">
+    <div class="victory-panel glass">
+      <p class="victory-crown" aria-hidden="true">🏆</p>
+      <h2 class="victory-title" id="victory-title">冒險完成</h2>
+      <p class="victory-sub" id="victory-sub">恭喜通關全部 4 關！</p>
+      <p class="victory-hero" id="victory-hero"></p>
+      <div class="victory-actions">
+        <button type="button" id="btn-victory-home" class="btn-text btn-secondary">回到主選單</button>
+        <button type="button" id="btn-victory-restart" class="btn-text btn-primary">重新開始</button>
+      </div>
+    </div>
+  </div>
+
   <script src="./stories.js?v=15"></script>
   <script src="./items.js?v=10"></script>
-  <script src="./engine.js?v=21"></script>
-  <script src="./world.js?v=21"></script>
-  <script src="./app.js?v=21"></script>
+  <script src="./engine.js?v=25"></script>
+  <script src="./world.js?v=25"></script>
+  <script src="./app.js?v=25"></script>
 </body>
 </html>
